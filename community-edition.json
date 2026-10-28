@@ -1,0 +1,13 @@
+{
+  "edition": "community",
+  "target": "ai-hub",
+  "repo": "TianLin0509/ai-hub",
+  "productName": "AI Hub",
+  "releaseNotes": [
+    "新的公开发布库 AI Hub（原社区版），内容同步到最新主线。"
+  ],
+  "version": "0.5.0",
+  "upstreamVersion": "1.6.662",
+  "upstreamCommit": "03c15966924a61368ae9c499b0cf4a5c8635a388",
+  "upstreamDirty": false
+}
