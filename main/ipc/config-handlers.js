@@ -313,6 +313,7 @@ function registerConfigIpc(ipcMain, deps) {
     ensureLaunchAuth,
     listSessionsForAccounts = () => [],
     prepareClaudeAccountDir = () => {},
+    prepareNewClaudeAccount = async () => ({}),
   } = deps;
 
   // 账号页：新建 / 改名 / 移除 Claude、Codex 订阅账号（2026-10-27）。
@@ -335,7 +336,12 @@ function registerConfigIpc(ipcMain, deps) {
     try {
       const kind = payload.kind;
       const homeDir = process.env.CLAUDE_HUB_HOME_DIR || require('os').homedir();
-      const profile = saveAccounts(kind, raw => accountRegistry.addAccount(raw, kind, payload.label, { homeDir, normalized: shownAccounts(kind) }));
+      const label = accountRegistry.cleanLabel(payload.label);
+      // Refused before anything is created on the VPS, so a typo leaves no orphan environment behind.
+      if (shownAccounts(kind).some(r => String(r.label || '').trim() === label)) throw new Error(`已有名为「${label}」的${kind === 'claude' ? 'Claude' : 'Codex'}账号`);
+      // 2026-10-28：Claude 新账号一次定好出口和 VPS 登录环境，第一次授权就走日后使用的同一 IP。
+      const born = kind === 'claude' && payload.route ? await prepareNewClaudeAccount({ route: payload.route, loginEnv: payload.loginEnv }) : {};
+      const profile = saveAccounts(kind, raw => accountRegistry.addAccount(raw, kind, payload.label, { homeDir, normalized: shownAccounts(kind), ...born }));
       require('fs').mkdirSync(profile.home, { recursive: true });
       // Settings (with the shared egress) are in place before the first login request.
       if (kind === 'claude') { try { prepareClaudeAccountDir(profile.home); } catch {} }

@@ -2,7 +2,7 @@
 
 把你自己的 Claude Code、Codex、Gemini CLI、Kimi 等 AI 放进一个 Windows 桌面工作台：单独对话、多 AI 群聊、开发分工看板、历史检索、文件预览、记忆文件库与能力管理。
 
-这是 AI Hub 的公开发行版，当前 **v0.5.0**，同步自上游 **1.6.662**（具体提交见 `community-edition.json`）。它不附带任何人的账号、聊天记录、私人模块或私人服务。MIT 开源；AI 服务的账号、订阅和用量由你自己提供。
+这是 AI Hub 的公开发行版，当前 **v0.5.0**，同步自上游 **1.6.667**（具体提交见 `community-edition.json`）。它不附带任何人的账号、聊天记录、私人模块或私人服务。MIT 开源；AI 服务的账号、订阅和用量由你自己提供。
 
 ## 最省事：让你的 AI 编码助手代装
 
@@ -24,7 +24,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File $setup -Version v0.5.0
 
 脚本下载并校验便携 ZIP，按版本安装、创建桌面入口并启动。重复执行会复用已验证的版本，旧版本和用户数据都保留。电脑上还没有 AI CLI 时，在最后一行加 `-Provider codex` 或 `-Provider claude`，脚本会调用官方原生安装器；已有 CLI 不会重复安装。**登录授权和模型使用权仍由你本人提供。**
 
-窗口标题会显示 `AI Hub Community v0.5.0（上游 1.6.662）`，报告问题时请带上这一行。
+窗口标题会显示 `AI Hub Community v0.5.0（上游 1.6.667）`，报告问题时请带上这一行。
 
 ## 装不上怎么办
 
