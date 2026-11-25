@@ -1,0 +1,168 @@
+/* 下面几个元素自己设了 display，hidden 属性要显式压过它 */
+[hidden] { display: none !important; }
+html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; width: 100%; height: 100%;
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif; user-select: none; -webkit-user-select: none; }
+#stage { position: absolute; inset: 0; }
+/* 大小与脚的位置由 pet.js 写入（2026-10-18）：--body 身体边长（原大小 150px），--feet 图里脚下那圈透明边的高度，
+   身体往下挪这么多，脚正好踩在窗口底边上方 6px（主进程按这个贴到任务栏上沿）。窗口宽固定 280px。 */
+:root { --body: 150px; --feet: 0px; }
+
+/* 身体：150×150，窗口底部居中。transform 每帧由 pet.js 写入（只改 transform / opacity，不触发排版）。 */
+#body { position: absolute; left: calc((280px - var(--body)) / 2); bottom: calc(6px - var(--feet)); width: var(--body); height: var(--body); transform-origin: 50% 92%;
+  will-change: transform; cursor: grab; }
+#body.dragging { cursor: grabbing; }
+#layers { position: absolute; inset: 0; }
+.layer { position: absolute; inset: 0; will-change: opacity; }
+.cel { position: absolute; inset: 0; background-repeat: no-repeat; background-size: contain; background-position: center; }
+.cel.sheet { background-size: 500% 500%; }
+.cel.next { opacity: 0; }
+
+#shadow { position: absolute; left: calc((280px - var(--body) * 0.64) / 2); bottom: 7px; width: calc(var(--body) * 0.64); height: calc(var(--body) * 0.093); border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(40, 52, 80, .22), rgba(40, 52, 80, 0)); will-change: transform, opacity; }
+
+/* 气泡：一次一句，8 秒后收进小圆点。
+   水平位置由 pet.js 的 layoutOverlays 写入（2026-10-18 审核）：对着看得见的身体居中，贴边时只放在屏幕里看得见的那一段，
+   --tail-x 是小尾巴离气泡左边的距离（指着身体），--to-dot-x 是收进小圆点时往哪边飞。 */
+.bubble { position: absolute; z-index: 2; bottom: calc(var(--body) - var(--feet) + 12px); left: 22px; max-width: 236px; box-sizing: border-box;
+  background: #fff; color: #1f2733; border-radius: 14px; padding: 9px 13px; font-size: 13.5px; line-height: 1.55;
+  box-shadow: 0 6px 18px rgba(20, 30, 50, .16), 0 0 0 1px rgba(20, 30, 50, .05); cursor: pointer; transform-origin: var(--tail-x, 50%) 100%;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.bubble::after { content: ""; position: absolute; left: var(--tail-x, 50%); bottom: -6px; margin-left: -6px; border: 6px solid transparent;
+  border-top-color: #fff; border-bottom: 0; }
+.bubble.in { animation: bubble-in 260ms cubic-bezier(.2, 1.4, .4, 1) both; }
+.bubble.out { animation: bubble-out 320ms cubic-bezier(.5, 0, .8, .4) both; }
+@keyframes bubble-in { from { opacity: 0; transform: translateY(8px) scale(.82); } to { opacity: 1; transform: none; } }
+@keyframes bubble-out { to { opacity: 0; transform: translate(var(--to-dot-x, 40px), 30px) scale(.2); } }
+@keyframes panel-in { from { opacity: 0; transform: translateY(8px) scale(.82); } to { opacity: 1; transform: none; } }
+
+/* 小圆点：身体右上角；left 由 pet.js 写入，贴边时挪回屏幕里看得见的那一段。 */
+.dot { position: absolute; bottom: calc(var(--body) * 0.933 - var(--feet)); left: calc((280px - var(--body)) / 2 + var(--body) * 0.807); min-width: 20px; height: 20px; border-radius: 10px; border: 2px solid #fff;
+  z-index: 2; /* 压在身体方框（含透明边）上面，不然贴边挪进来后会被身体那层挡住、点不到 */
+  background: #3478f6; color: #fff; font-size: 11px; font-weight: 700; padding: 0 5px; box-sizing: border-box; cursor: pointer;
+  box-shadow: 0 2px 6px rgba(52, 120, 246, .35); font-family: inherit; line-height: 16px; }
+.dot.bump { animation: dot-bump 420ms cubic-bezier(.2, 1.6, .4, 1); }
+@keyframes dot-bump { from { transform: scale(.4); } to { transform: scale(1); } }
+
+/* 展开面板：点气泡或小圆点后显示完整内容。2026-10-17 打磨：标题行 + 类别小标签 + 右对齐的「在助理里打开」。
+   left / right 由 pet.js 写入：贴边时让出伸出屏幕的那一截，「在助理里打开 ›」和 × 都点得到。 */
+.panel { position: absolute; z-index: 3; left: 10px; right: 10px; bottom: calc(var(--body) - var(--feet) + 12px); max-height: 172px; box-sizing: border-box; background: #fff;
+  color: #1f2733; border-radius: 12px; padding: 8px 4px 8px 12px; box-shadow: 0 10px 28px rgba(20, 30, 50, .18), 0 2px 6px rgba(20, 30, 50, .08), 0 0 0 1px rgba(20, 30, 50, .06);
+  display: flex; flex-direction: column; animation: panel-in 200ms cubic-bezier(.2, 1.2, .4, 1) both; }
+.panel[hidden] { display: none; }
+.panel-head { display: flex; align-items: center; gap: 6px; padding: 0 6px 6px 0; border-bottom: 1px solid #edf0f5; margin-bottom: 6px; }
+.panel-head b { font-size: 12.5px; color: #4a5568; font-weight: 600; }
+.panel-head span { font-size: 11.5px; color: #8a94a6; }
+.panel-close { margin-left: auto; width: 22px; height: 22px; border: 0; border-radius: 50%; background: none; font-size: 16px; color: #8a94a6; cursor: pointer; line-height: 1; padding: 0; }
+.panel-close:hover { background: #f1f3f7; color: #1f2733; }
+.panel-list { overflow-y: auto; padding-right: 8px; user-select: text; -webkit-user-select: text; }
+.panel-list::-webkit-scrollbar { width: 6px; }
+.panel-list::-webkit-scrollbar-thumb { background: #d9dee7; border-radius: 3px; }
+.panel-item + .panel-item { border-top: 1px solid #f1f3f7; margin-top: 8px; padding-top: 8px; }
+.panel-item .kind, .bubble-kind { display: inline-block; font-size: 11px; line-height: 16px; padding: 0 6px; border-radius: 4px; background: #eef4ff; color: #2f6ad9; margin-right: 6px; vertical-align: 1px; font-weight: 500; }
+.panel-item b { font-size: 13px; line-height: 1.5; font-weight: 600; }
+.panel-item p { margin: 3px 0 4px; font-size: 12.5px; line-height: 1.6; color: #4a5568; white-space: pre-wrap;
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.panel-item .open { display: block; margin-left: auto; border: 0; background: none; color: #3478f6; font-size: 12.5px; padding: 2px 0; cursor: pointer; font-family: inherit; }
+.panel-item .open:hover { text-decoration: underline; }
+
+/* ---------- 通知卡片（2026-11-09） ----------
+   原来右下角那张通知卡，开着桌宠时改由桌宠举着说：白底、一种强调色，和桌宠气泡一套。
+   left / --tail-x 由 pet.js 的 layoutOverlays 写入；底部细条是倒计时，鼠标停在卡片上时暂停。 */
+.ncard { position: absolute; z-index: 3; bottom: calc(var(--body) - var(--feet) + 12px); left: 10px; width: 260px; max-width: 260px; box-sizing: border-box;
+  background: #fff; color: #1f2733; border-radius: 14px; padding: 10px 12px 13px 13px; cursor: pointer;
+  box-shadow: 0 10px 28px rgba(20, 30, 50, .18), 0 2px 6px rgba(20, 30, 50, .08), 0 0 0 1px rgba(20, 30, 50, .06);
+  transform-origin: var(--tail-x, 50%) 100%; --accent: #3478f6; }
+.ncard.bad { --accent: #d9822b; }
+.ncard.in { animation: bubble-in 280ms cubic-bezier(.2, 1.4, .4, 1) both; }
+.ncard.out { animation: bubble-out 320ms cubic-bezier(.5, 0, .8, .4) both; }
+.ncard:hover { box-shadow: 0 12px 30px rgba(20, 30, 50, .22), 0 2px 6px rgba(20, 30, 50, .08), 0 0 0 1px rgba(52, 120, 246, .35); }
+.ncard-head { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #6b7686; line-height: 18px; }
+.ncard-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); flex: 0 0 auto; }
+#ncard-kind { font-weight: 600; color: var(--accent); }
+#ncard-time { color: #8a94a6; }
+.ncard-close { margin-left: auto; width: 20px; height: 20px; border: 0; border-radius: 50%; background: none; font-size: 15px; color: #8a94a6; cursor: pointer; line-height: 1; padding: 0; font-family: inherit; }
+.ncard-close:hover { background: #f1f3f7; color: #1f2733; }
+.ncard b { display: block; margin-top: 4px; font-size: 14px; line-height: 1.45; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ncard p { margin: 3px 0 0; font-size: 12.5px; line-height: 1.55; color: #4a5568; white-space: pre-wrap; word-break: break-word;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ncard p:empty { display: none; }
+.ncard-foot { display: flex; align-items: baseline; gap: 8px; margin-top: 7px; font-size: 12px; }
+#ncard-cta { color: var(--accent); font-weight: 600; }
+#ncard-count { margin-left: auto; color: #8a94a6; font-size: 11.5px; }
+.ncard-bar { position: absolute; left: 13px; right: 12px; bottom: 5px; height: 2px; border-radius: 1px; background: var(--accent); opacity: .45; transform-origin: 0 50%; }
+.ncard-bar.run { animation: ncard-countdown var(--ms, 9000ms) linear both; }
+.ncard.held .ncard-bar { animation-play-state: paused; }
+@keyframes ncard-countdown { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+/* 卡片的小尾巴，指着身体 */
+.ncard::after { content: ""; position: absolute; left: var(--tail-x, 50%); bottom: -6px; margin-left: -6px; border: 6px solid transparent; border-top-color: #fff; border-bottom: 0; }
+
+/* ---------- 正在跑的会话（2026-11-09）：身体左上角一个小标签，看一眼就知道活干完没有 ---------- */
+.busy { position: absolute; z-index: 2; bottom: calc(var(--body) * 0.9 - var(--feet)); left: calc((280px - var(--body)) / 2 - 4px); height: 20px; padding: 0 8px 0 6px; box-sizing: border-box;
+  display: flex; align-items: center; gap: 5px; border-radius: 10px; background: rgba(255, 255, 255, .94); color: #2f6ad9; font-size: 11.5px; font-weight: 600;
+  box-shadow: 0 2px 8px rgba(20, 30, 50, .14), 0 0 0 1px rgba(52, 120, 246, .18); pointer-events: none; white-space: nowrap; }
+.busy i { width: 8px; height: 8px; border-radius: 50%; border: 2px solid rgba(52, 120, 246, .25); border-top-color: #3478f6; animation: busy-spin 1s linear infinite; }
+@keyframes busy-spin { to { transform: rotate(360deg); } }
+
+/* ---------- 问助理（2026-11-09） ---------- */
+.ask { position: absolute; z-index: 4; left: 10px; right: 10px; bottom: calc(var(--body) - var(--feet) + 12px); box-sizing: border-box; margin: 0;
+  background: #fff; color: #1f2733; border-radius: 14px; padding: 10px 12px 10px;
+  box-shadow: 0 10px 28px rgba(20, 30, 50, .2), 0 2px 6px rgba(20, 30, 50, .08), 0 0 0 1px rgba(52, 120, 246, .3);
+  animation: panel-in 200ms cubic-bezier(.2, 1.2, .4, 1) both; }
+.ask-head { display: flex; align-items: baseline; gap: 8px; }
+.ask-head b { font-size: 13px; }
+.ask-head span { margin-left: auto; font-size: 11px; color: #8a94a6; }
+.ask-head span.bad { color: #c0392b; }
+.ask textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 7px; resize: none; border: 1px solid #d9dee7; border-radius: 9px; padding: 7px 9px;
+  font: 13px/1.5 "Microsoft YaHei UI", "Microsoft YaHei", sans-serif; color: #1f2733; outline: none; user-select: text; -webkit-user-select: text; }
+.ask textarea:focus { border-color: #3478f6; box-shadow: 0 0 0 3px rgba(52, 120, 246, .14); }
+.ask-foot { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.ask-btn { height: 26px; padding: 0 12px; border-radius: 7px; border: 1px solid #d9dee7; background: #fff; color: #4a5568; font: 12.5px "Microsoft YaHei UI", "Microsoft YaHei", sans-serif; cursor: pointer; }
+.ask-btn.primary { background: #3478f6; border-color: #3478f6; color: #fff; font-weight: 600; }
+.ask-btn:disabled { opacity: .55; cursor: default; }
+.panel-item .when { margin-left: 6px; font-size: 11px; color: #8a94a6; }
+
+/* ---------- 等级联动（2026-11-12）：装饰只用 transform / opacity 动，不触发排版 ---------- */
+/* 等级角标：脚边右侧的小标签 */
+.lv { position: absolute; z-index: 2; bottom: 9px; left: calc((280px - var(--body)) / 2 + var(--body) * 0.66); height: 17px; padding: 0 7px; box-sizing: border-box; border-radius: 9px;
+  background: #2f6ad9; color: #fff; font: 700 10.5px/17px "Segoe UI", "Microsoft YaHei UI", sans-serif; letter-spacing: .2px; white-space: nowrap; pointer-events: none;
+  box-shadow: 0 2px 6px rgba(20, 40, 90, .25), 0 0 0 1.5px #fff; }
+/* 底边压进头部 18%，不漂浮；翅膀先画，身体居中，头饰最后画。 */
+#evolve-head, #evolve-wings { position: absolute; display: block; height: auto; pointer-events: none; }
+#evolve-head { z-index: 1; transform: translate(-50%, -82%); }
+#evolve-wings { transform: translate(-50%, -35%); animation: wing-breathe 3.2s ease-in-out infinite; }
+#evolve-wings.royal { filter: drop-shadow(0 0 4px rgba(255, 222, 125, .75)); }
+@keyframes wing-breathe { 0%, 100% { transform: translate(-50%, -35%) scaleY(.97); } 50% { transform: translate(-50%, -35%) scaleY(1.03); } }
+/* 叠当前帧的白色轮廓，黑色身体也能泛白；单用 brightness 会让深色形象几乎不变。 */
+#body.evolving .cel::after { content: ""; position: absolute; inset: 0; background: inherit;
+  filter: brightness(0) invert(1) drop-shadow(0 0 8px #fff); animation: evolution-glow 1.2s ease-in both; }
+@keyframes evolution-glow { 0% { opacity: 0; } 85% { opacity: .88; } 96%, 100% { opacity: 1; } }
+#evolve-head.evolve-pop { animation: evolution-wear 420ms cubic-bezier(.2, 1.5, .4, 1) both; }
+@keyframes evolution-wear { from { transform: translate(-50%, -115%) scale(.7); } to { transform: translate(-50%, -82%) scale(1); } }
+body.peeking #sparks, body.peeking #halo, body.peeking .lv { display: none; }
+/* 星光：身边三颗小星星轮流闪 */
+#sparks { position: absolute; inset: 0; pointer-events: none; }
+#sparks i { position: absolute; width: 11px; height: 11px; background: #ffc83d; opacity: 0;
+  clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%); animation: spark 4.8s ease-in-out infinite; }
+#sparks i:nth-child(1) { left: 10%; top: 26%; }
+#sparks i:nth-child(2) { right: 8%; top: 40%; width: 8px; height: 8px; animation-delay: 1.6s; }
+#sparks i:nth-child(3) { right: 20%; top: 12%; width: 9px; height: 9px; animation-delay: 3.2s; }
+@keyframes spark { 0%, 62%, 100% { opacity: 0; transform: scale(.3) rotate(0deg); } 74% { opacity: 1; transform: scale(1) rotate(40deg); } 88% { opacity: 0; transform: scale(.5) rotate(90deg); } }
+/* 光环：脚下一圈柔光，慢慢呼吸 */
+#halo { position: absolute; left: calc((280px - var(--body) * 0.9) / 2); bottom: 1px; width: calc(var(--body) * 0.9); height: calc(var(--body) * 0.2); border-radius: 50%; pointer-events: none;
+  background: radial-gradient(closest-side, rgba(255, 205, 80, 0) 52%, rgba(255, 196, 60, .55) 66%, rgba(90, 150, 255, .28) 80%, rgba(90, 150, 255, 0) 100%); animation: halo-breathe 3.6s ease-in-out infinite; }
+@keyframes halo-breathe { 0%, 100% { opacity: .65; transform: scale(.96); } 50% { opacity: 1; transform: scale(1.04); } }
+/* 撒花与爱心 */
+#fx { position: absolute; inset: 0; pointer-events: none; z-index: 3; overflow: hidden; }
+#fx i { position: absolute; left: var(--x); bottom: var(--y); width: 7px; height: 10px; border-radius: 2px; background: var(--c); opacity: 0;
+  animation: confetti var(--d, 1.5s) cubic-bezier(.15, .7, .3, 1) var(--delay, 0s) both; }
+@keyframes confetti { 0% { opacity: 1; transform: translate(0, 0) rotate(0deg); } 45% { opacity: 1; transform: translate(calc(var(--dx) * .8), calc(var(--up) * -1)) rotate(260deg); } 100% { opacity: 0; transform: translate(var(--dx), calc(var(--up) * -0.2)) rotate(620deg); } }
+#fx b { position: absolute; left: var(--x); bottom: var(--y); width: 14px; height: 13px; opacity: 0; background: #ff5d7a;
+  clip-path: path("M7 13 C7 13 0 8.2 0 3.8 C0 1.6 1.7 0 3.7 0 C5.1 0 6.3 .8 7 2 C7.7 .8 8.9 0 10.3 0 C12.3 0 14 1.6 14 3.8 C14 8.2 7 13 7 13 Z");
+  animation: heart-up 1.3s ease-out var(--delay, 0s) both; }
+@keyframes heart-up { 0% { opacity: 0; transform: translateY(6px) scale(.4); } 20% { opacity: 1; transform: translateY(0) scale(1); } 100% { opacity: 0; transform: translate(var(--dx), -46px) scale(1.15); } }
+@media (prefers-reduced-motion: reduce) { #evolve-wings, #evolve-head, #sparks i, #halo, #fx *, .ncard-art { animation: none !important; } #body.evolving .cel::after { content: none; } }
+/* 成长卡片：金色点缀，右侧一枚徽章 */
+.ncard.growth { --accent: #d99a12; }
+.ncard-art { position: absolute; right: 12px; top: 30px; width: 46px; height: 46px; background: center / contain no-repeat; pointer-events: none; animation: art-pop 520ms cubic-bezier(.2, 1.5, .4, 1) 120ms both; }
+.ncard.has-art b, .ncard.has-art p { padding-right: 54px; }
+@keyframes art-pop { from { opacity: 0; transform: scale(.4) rotate(-18deg); } to { opacity: 1; transform: none; } }

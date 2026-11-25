@@ -1,0 +1,23 @@
+'use strict';
+// 纯净版不带 CodeAgent 适配：这是同名空实现，只为让共用代码里的引用照常加载；纯净版没有 CodeAgent 会话，这些函数不会真正被用到。
+const routeSwitchEnabled = () => false;
+const routeAccounts = () => [];
+const personalAccount = () => false;
+const personalModels = () => [];
+const describeMismatch = () => null;
+const canServe = () => false;
+const canEverServe = () => false;
+const servableNow = () => null;
+const pickRoute = () => null;
+const pickAnyRoute = () => null;
+const modelTable = () => [];
+const tableSignature = () => '';
+const avoidSignature = () => '';
+const listModels = () => [];
+const canonicalModel = () => '';
+const isPrimary = () => false;
+const hasModel = () => false;
+const earliestUntil = () => null;
+const avoidFor = () => null;
+const requestModel = () => '';
+module.exports = { routeSwitchEnabled, routeAccounts, personalAccount, personalModels, describeMismatch, canServe, canEverServe, servableNow, pickRoute, pickAnyRoute, modelTable, tableSignature, avoidSignature, listModels, canonicalModel, isPrimary, hasModel, earliestUntil, avoidFor, requestModel };

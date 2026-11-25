@@ -1,0 +1,154 @@
+/*
+   一个 Tab 一屏：弹窗高度随窗口，左右两栏各自在框内排布，右侧明细分页，不出整页滚动条。 */
+.ov-mask{--ov-bg:#f3f2f7;--ov-ink:#221d2e;--ov-ink2:#575166;--ov-ink3:#9590a3;--ov-line:#e8e6ef;--ov-soft:#f7f6fa;--ov-acc:#5b3a8c;--ov-acc-soft:#efeaf7;
+  --ov-red:#c9353a;--ov-red-soft:#fdeeee;--ov-amber:#a8650f;--ov-amber-soft:#fbf3e6;--ov-green:#2f7d4a;--ov-green-soft:#eaf5ee;
+  position:fixed;inset:0;z-index:2400;background:rgba(34,29,46,.3);display:flex;align-items:center;justify-content:center;color:var(--ov-ink);
+  font:14px/1.6 "Microsoft YaHei UI","Microsoft YaHei","Segoe UI",sans-serif;-webkit-app-region:no-drag}
+.ov-mask[hidden]{display:none}
+.ov-mask *{box-sizing:border-box}
+.ov-mask button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-align:left}
+.ov-mask button:focus-visible{outline:2px solid var(--ov-acc);outline-offset:2px;border-radius:8px}
+.ov-modal{width:min(1240px,calc(100vw - 64px));height:min(820px,calc(100vh - 64px));background:#fff;border-radius:20px;box-shadow:0 30px 80px -20px rgba(40,30,70,.35);display:flex;flex-direction:column;overflow:hidden}
+.ov-head{display:flex;align-items:flex-end;gap:22px;padding:16px 24px 0;border-bottom:1px solid var(--ov-line)}
+.ov-head h2{margin:0 0 12px;font-size:19px;font-weight:700}
+.ov-tabs{display:flex;gap:6px}
+.ov-tabs button{padding:8px 12px 11px;border-bottom:2px solid transparent;color:var(--ov-ink2);font-size:14.5px}
+.ov-tabs button[aria-selected="true"]{color:var(--ov-acc);font-weight:700;border-bottom-color:var(--ov-acc)}
+.ov-n{margin-left:6px;font-size:12px;background:var(--ov-acc-soft);color:var(--ov-acc);border-radius:8px;padding:0 6px}
+.ov-n:empty{display:none}
+.ov-sp{flex:1}
+.ov-at{font-size:12px;color:var(--ov-ink3);margin-bottom:13px}
+.ov-icon{font-size:18px;color:var(--ov-ink3);margin-bottom:9px;padding:0 4px}
+.ov-icon:hover{color:var(--ov-ink)}
+.ov-body{flex:1;min-height:0;padding:14px 24px;display:flex;flex-direction:column;gap:12px}
+.ov-foot{display:flex;gap:16px;justify-content:space-between;padding:9px 24px;border-top:1px solid var(--ov-line);font-size:12px;color:var(--ov-ink3)}
+.ov-cols{flex:1;min-height:0;display:grid;grid-template-columns:360px minmax(0,1fr);border:1px solid var(--ov-line);border-radius:14px;overflow:hidden}
+.ov-left{background:var(--ov-soft);border-right:1px solid var(--ov-line);display:flex;flex-direction:column;min-height:0}
+.ov-left-head{display:flex;justify-content:space-between;padding:10px 16px;font-size:12.5px;color:var(--ov-ink3);border-bottom:1px solid var(--ov-line)}
+.ov-left-head b{color:var(--ov-ink);font-weight:600}
+.ov-list{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column}
+.ov-li{display:flex;flex-direction:column;gap:3px;padding:11px 16px;border-bottom:1px solid var(--ov-line);border-left:3px solid transparent;width:100%}
+.ov-li:hover{background:#fff}
+.ov-li.on{background:var(--ov-acc-soft);border-left-color:var(--ov-acc)}
+.ov-li.stale,.ov-li.unv{opacity:.72}
+.ov-li-top{display:flex;align-items:center;gap:8px;justify-content:space-between}
+.ov-li-top b{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ov-li-q{font-size:13px;color:var(--ov-ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ov-li.done .ov-li-q{color:var(--ov-ink2)}
+.ov-li-meta{display:flex;justify-content:space-between;font-size:12px;color:var(--ov-ink3)}
+.ov-tags{display:flex;gap:4px;flex:none}
+.ov-chip{flex:none;font-size:11.5px;line-height:18px;padding:0 7px;border-radius:7px;background:var(--ov-soft);color:var(--ov-ink2);white-space:nowrap}
+.ov-chip.bad{background:var(--ov-red-soft);color:var(--ov-red)}
+.ov-chip.warn{background:var(--ov-amber-soft);color:var(--ov-amber)}
+.ov-chip.ok{background:var(--ov-green-soft);color:var(--ov-green)}
+.ov-chip.acc{background:var(--ov-acc-soft);color:var(--ov-acc)}
+.ov-chip.mute{background:#efeef3;color:var(--ov-ink3)}
+.ov-fold{padding:8px 16px;font-size:12.5px;color:var(--ov-acc)!important;border-bottom:1px solid var(--ov-line)}
+.ov-sec{padding:10px 16px 4px;font-size:12px;color:var(--ov-ink3)}
+.ov-empty{padding:28px 16px;color:var(--ov-ink3);text-align:center}
+.ov-empty.big{margin:auto;font-size:16px;color:var(--ov-ink2)}
+.ov-empty small{font-size:12.5px;color:var(--ov-ink3)}
+.ov-right{min-height:0;overflow:auto;padding:20px 28px;display:flex;flex-direction:column}
+.ov-crumb{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ov-ink3);flex-wrap:wrap}
+.ov-link{color:var(--ov-acc)!important;font-weight:600}
+.ov-link:hover{text-decoration:underline}
+.ov-link small{margin-left:6px;font-size:11px;color:var(--ov-ink3);font-weight:400}
+.ov-code{font-family:Consolas,monospace;font-size:12px;color:var(--ov-ink3)}
+.ov-q{margin:10px 0 4px;font-size:20px;line-height:1.5;font-weight:700}
+.ov-meta{font-size:12.5px;color:var(--ov-ink3)}
+.ov-rec{margin-top:14px;border-left:3px solid var(--ov-acc);padding:2px 0 2px 14px;display:flex;flex-direction:column}
+.ov-rec small,.ov-nr small{font-size:12px;color:var(--ov-ink3)}
+.ov-rec b{font-size:15.5px;color:var(--ov-acc)}
+.ov-nr{margin-top:12px;background:var(--ov-soft);border-radius:10px;padding:8px 14px;display:flex;flex-direction:column}
+.ov-nr span{color:var(--ov-red)}
+.ov-nr.none span{color:var(--ov-ink2)}
+.ov-sec2{margin-top:14px;font-size:12px;color:var(--ov-ink3)}
+.ov-opts{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.ov-opt{height:32px;padding:0 13px;border-radius:9px;box-shadow:0 0 0 1px var(--ov-line);background:#fff;font-size:13px}
+.ov-opt.rec{background:var(--ov-acc-soft);color:var(--ov-acc)!important;box-shadow:0 0 0 1px #d9cfee}
+.ov-opt.sel{box-shadow:0 0 0 2px var(--ov-acc)}
+.ov-ta{margin-top:10px;width:100%;min-height:64px;max-height:120px;resize:vertical;border:1px solid var(--ov-line);border-radius:10px;padding:8px 12px;font:inherit;font-size:13.5px;color:var(--ov-ink);outline:none}
+.ov-ta:focus{border-color:#cdbde6}
+.ov-send{display:flex;align-items:center;gap:12px;margin-top:10px;font-size:12px;color:var(--ov-ink3)}
+.ov-send b{color:var(--ov-ink2)}
+.ov-res{flex:1;text-align:right;color:var(--ov-green)}
+.ov-res.failed,.ov-res.need,.ov-res.missing,.ov-res.superseded,.ov-res.expired{color:var(--ov-red)}
+.ov-res.unknown,.ov-res.queued,.ov-res.sending{color:var(--ov-amber)}
+.ov-go{margin-left:auto;height:36px;padding:0 20px;border-radius:10px;background:var(--ov-acc)!important;color:#fff!important;font-weight:600;flex:none}
+.ov-go[disabled]{opacity:.55;cursor:default}
+.ov-steps{margin-top:14px;display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ov-ink3)}
+.ov-steps .on{color:var(--ov-green)}
+.ov-steps i{font-style:normal}
+.ov-plain{flex:none;background:var(--ov-acc-soft);border-radius:12px;padding:9px 16px}
+.ov-plain small{font-size:12px;color:var(--ov-acc);font-weight:600}
+.ov-plain p{margin:2px 0 0;font-size:14px;line-height:1.65}
+.ov-alert{border-bottom:1px solid var(--ov-line);background:#fff8f0;padding:10px 16px;display:flex;flex-direction:column;gap:4px}
+.ov-alert>b{font-size:13px;color:var(--ov-red)}
+.ov-alert button{display:flex;flex-direction:column;padding:2px 0}
+.ov-a-t{font-size:12.5px;color:var(--ov-red)}
+.ov-a-l{font-size:12px;color:var(--ov-ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ov-a-more{font-size:12px;color:var(--ov-ink3)}
+.ov-g-head{display:flex;align-items:baseline;gap:12px;margin-bottom:6px}
+.ov-g-head h3{margin:0;font-size:18px}
+.ov-g-head span{font-size:12.5px;color:var(--ov-ink3)}
+.ov-row{padding:11px 0;border-bottom:1px solid var(--ov-line)}
+.ov-row-top{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.ov-row-line{margin-top:3px;font-size:14px}
+.ov-row.warn .ov-row-line{color:var(--ov-red)}
+.ov-row-meta{margin-top:2px;font-size:12px;color:var(--ov-ink3)}
+.ov-pager{margin-top:auto;padding-top:10px;display:flex;gap:12px;align-items:center;justify-content:flex-end;font-size:12.5px;color:var(--ov-ink3)}
+.ov-pager button{padding:3px 10px;border-radius:8px;box-shadow:0 0 0 1px var(--ov-line)}
+.ov-pager button[disabled]{opacity:.4;cursor:default}
+/* 前台会话顶栏：只留「当前概览」和「⋯」（2026-11-25）。 */
+.assistant-overview-btn.btn-zoom,.app-toolbar .terminal-header-actions .assistant-overview-btn.btn-zoom{display:inline-flex;align-items:center;gap:6px;width:auto;min-width:84px;flex-shrink:0;white-space:nowrap;padding:0 10px}
+.assistant-more.btn-zoom,.app-toolbar .terminal-header-actions .assistant-more.btn-zoom{width:auto;min-width:30px;flex-shrink:0;padding:0 8px;font-size:16px;letter-spacing:1px}
+.assistant-overview-btn .ov-badge{min-width:18px;height:18px;line-height:18px;border-radius:9px;background:#e2474b;color:#fff;font-size:11.5px;text-align:center;padding:0 5px}
+.assistant-overview-btn .ov-badge[hidden]{display:none}
+/* 自动续跑 P1：「现在停着」角标（橙，和红色的待决策区分）、续跑 Tab 左栏分组头、底栏总开关 */
+.assistant-overview-btn .ov-badge-stall{background:#e8912d;margin-left:3px}
+.ov-ar-sec{padding:6px 16px 4px;font-size:12px;color:var(--ov-ink2,#6b7280);background:transparent;border-bottom:1px solid var(--ov-line)}
+.ov-ar-switch{display:inline-flex;align-items:center;gap:6px}
+.ov-ar-switch .ov-mode{margin:0}
+.assistant-more-menu{position:fixed;z-index:2300;min-width:230px;background:#fff;border:1px solid #dfe6f1;border-radius:10px;box-shadow:0 12px 32px rgba(23,47,81,.16);padding:6px;display:flex;flex-direction:column;font:13px/1.5 "Microsoft YaHei UI","Microsoft YaHei",sans-serif;color:#1b2942}
+.assistant-more-menu button{text-align:left;padding:7px 10px;border-radius:7px;background:none;border:0;font:inherit;color:inherit;cursor:pointer}
+.assistant-more-menu button:hover{background:#f1f4fa}
+.assistant-more-menu small{display:block;color:#77859b;font-size:11.5px}
+.assistant-more-menu hr{border:0;border-top:1px solid #e6ebf3;margin:4px 2px}
+.assistant-more-menu .assistant-notice-list{position:static;width:auto;max-height:260px;overflow:auto;padding:6px 10px;border:0;border-radius:0;box-shadow:none;background:#f7f9fc;margin:0 2px 4px;font-size:12px}
+.assistant-more-menu .assistant-notice-list button{width:auto;display:inline;padding:2px 6px;margin-left:8px;border:1px solid #dfe6f1}
+/* 左栏底部：分页与「待核实 / 已回复」切换（2026-11-25 审查：左栏也要一屏，不出滚动条）。 */
+.ov-left .ov-list{overflow:hidden}
+.ov-left-foot{flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;border-top:1px solid var(--ov-line);font-size:12px;color:var(--ov-ink3)}
+.ov-lp{display:inline-flex;align-items:center;gap:6px;margin-right:auto}
+.ov-lp button{width:24px;height:24px;border-radius:7px;box-shadow:0 0 0 1px var(--ov-line);background:#fff;text-align:center!important}
+.ov-lp button[disabled]{opacity:.4;cursor:default}
+.ov-mode{padding:3px 10px;border-radius:8px;box-shadow:0 0 0 1px var(--ov-line);background:#fff;font-size:12px;color:var(--ov-ink2)!important}
+.ov-mode.on{background:var(--ov-acc-soft);color:var(--ov-acc)!important;box-shadow:0 0 0 1px #d9cfee}
+.ov-changed{margin-top:10px;padding:7px 12px;border-radius:9px;background:var(--ov-amber-soft);color:var(--ov-amber);font-size:13px}
+.ov-right{overflow:hidden}
+
+.ov-left-head{align-items:center;gap:8px}
+.ov-left-head.warn{background:var(--ov-amber-soft)}
+.ov-left-head .ov-confirm{color:var(--ov-amber);font-weight:600}
+.ov-confirm-btns{display:inline-flex;gap:6px;flex:none}
+.ov-skipall{padding:2px 10px;border-radius:8px;box-shadow:0 0 0 1px var(--ov-line);background:#fff;font-size:12px;color:var(--ov-ink2)!important;flex:none}
+.ov-skipall.yes{background:var(--ov-acc)!important;color:#fff!important;box-shadow:none}
+.ov-skipall[disabled]{opacity:.55;cursor:default}
+.ov-skipnote{flex:none;padding:6px 16px;font-size:12px;color:var(--ov-green);border-bottom:1px solid var(--ov-line)}
+.ov-skip{height:36px;padding:0 16px;border-radius:10px;box-shadow:0 0 0 1px var(--ov-line);background:#fff;color:var(--ov-ink2)!important;flex:none;margin-left:auto}
+.ov-skip+.ov-go{margin-left:0}
+.ov-skip[disabled]{opacity:.55;cursor:default}
+.ov-warn-inline{margin-left:6px;color:var(--ov-red);font-weight:600}
+
+.ov-plain.one{padding:10px 16px}
+.ov-plain.one p{margin:0;font-size:14px}
+.ov-table{flex:1;min-height:0;overflow:hidden;border:1px solid var(--ov-line);border-radius:14px;background:#fff}
+.ov-tr{display:grid;grid-template-columns:64px minmax(160px,300px) minmax(0,1fr) 92px;align-items:center;gap:14px;height:50px;padding:0 16px;border-bottom:1px solid var(--ov-line);font-size:13.5px}
+.ov-tr:last-child{border-bottom:none}
+.ov-tr .ov-chip{justify-self:start}
+.ov-tr.done{color:var(--ov-ink3)}
+.ov-tn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;font-weight:600}
+.ov-tl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ov-ink2)}
+.ov-tl.warn{color:var(--ov-red)}
+.ov-tw{text-align:right;color:var(--ov-ink3);font-size:12.5px;white-space:nowrap}
+.ov-tfoot{flex:none;display:flex;align-items:center;justify-content:space-between;padding:8px 4px 0}

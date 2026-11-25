@@ -1,0 +1,586 @@
+'use strict';
+
+const path = require('node:path');
+const os = require('node:os');
+const fs = require('node:fs');
+const { createHash } = require('node:crypto');
+const { fork } = require('node:child_process');
+const {
+  DEFAULT_MAX_CANDIDATE_SESSIONS,
+  DEFAULT_MAX_DOC_CHARS,
+  DEFAULT_MAX_FILE_BYTES,
+  DEFAULT_MAX_QUERY_DOCS,
+  DEFAULT_MAX_SOURCE_CHARS,
+  DEFAULT_MAX_SOURCES,
+  sqlitePathForLegacyCache,
+} = require('./session-search-config.js');
+
+const DEFAULT_RECONCILE_MS = 30 * 60_000;
+const RECONCILE_YIELD_EVERY = 200;
+// 搜索进程平时降到「低于正常」优先级，后台建索引不和界面抢 CPU。但查询也在同一个进程里：
+// 电脑 CPU 跑满时（2026-11-23 实测整机 100%），低优先级的查询被饿住，同一次搜索从 0.4 秒
+// 拖到 6~30 秒。用户发起搜索/预览时临时升回「正常」，最后一个请求返回后 3 秒再降回去：
+// 查询只占一个核、每次几十毫秒，不会让界面卡；后台建索引的大部分时间仍在低优先级。
+const INTERACTIVE_REQUESTS = new Set(['search', 'preview']);
+const INTERACTIVE_BOOST_HOLD_MS = 3000;
+const PRIORITY = (os.constants && os.constants.priority) || {};
+
+class SessionSearchService {
+  constructor(options = {}) {
+    this._fork = options.fork || fork;
+    this._childPath = options.childPath || path.join(__dirname, 'session-search-child.js');
+    this._prewarmEnabled = options.prewarmEnabled === true;
+    this._childData = {
+      cachePath: options.cachePath || null,
+      databasePath: options.databasePath || sqlitePathForLegacyCache(options.cachePath),
+      backgroundWriter: options.backgroundWriter !== false,
+      claudeRoots: Array.isArray(options.claudeRoots) ? options.claudeRoots : [],
+      // claudeRoots 里哪些是 CodeAgent 的记录目录（结果按 CodeAgent 标注、可单独筛选）。
+      codeagentRoots: Array.isArray(options.codeagentRoots) ? options.codeagentRoots : [],
+      codexRoots: Array.isArray(options.codexRoots) ? options.codexRoots : [],
+      kimiRoots: Array.isArray(options.kimiRoots) ? options.kimiRoots : [],
+      geminiRoots: Array.isArray(options.geminiRoots) ? options.geminiRoots : [],
+      meetingDir: options.meetingDir || null,
+      transcriptDir: options.transcriptDir || null,
+      refreshTtlMs: Number(options.refreshTtlMs) || 60_000,
+      maxSources: Math.max(20, Number(options.maxSources) || DEFAULT_MAX_SOURCES),
+      maxFileBytes: Math.max(1024 * 1024, Number(options.maxFileBytes) || DEFAULT_MAX_FILE_BYTES),
+      maxSourceChars: Math.max(64 * 1024, Number(options.maxSourceChars) || DEFAULT_MAX_SOURCE_CHARS),
+      maxDocChars: Math.max(8 * 1024, Number(options.maxDocChars) || DEFAULT_MAX_DOC_CHARS),
+      maxCandidateSessions: Math.max(50, Number(options.maxCandidateSessions) || DEFAULT_MAX_CANDIDATE_SESSIONS),
+      maxQueryDocs: Math.max(1000, Number(options.maxQueryDocs) || DEFAULT_MAX_QUERY_DOCS),
+    };
+    this._childMemoryLimitMb = Math.max(256, Number(options.childMemoryLimitMb) || 768);
+    this._setPriority = typeof options.setPriority === 'function' ? options.setPriority : (pid, priority) => os.setPriority(pid, priority);
+    this._boostHoldMs = Math.max(0, Number(options.boostHoldMs ?? INTERACTIVE_BOOST_HOLD_MS));
+    this._childBoosted = false;
+    this._unboostTimer = null;
+    this._requestTimeoutMs = Math.max(50, Number(options.requestTimeoutMs) || 180_000);
+    // 搜索要重新拉起进程、装内存目录、预热短词档（冷启动 1 秒以上），正是「隔一会儿再搜要等很久」
+    // 的主因；常驻多占的内存（最近 8 天提问约 16MB + SQLite 缓存）用户已同意。
+    // 仍可用 idleMs / HUB_SESSION_SEARCH_IDLE_MS 设一个正数恢复空闲退出（测试用）。
+    const idleMs = Number(options.idleMs ?? process.env.HUB_SESSION_SEARCH_IDLE_MS ?? 0);
+    this._idleMs = Number.isFinite(idleMs) && idleMs > 0 ? idleMs : 0;
+    this._idleTimer = null;
+    this._idleStopping = null;
+    this._childBusy = false;
+    this._reconcileBusy = false;
+    const reconcileMs = Number(options.reconcileMs ?? process.env.HUB_SESSION_SEARCH_RECONCILE_MS ?? DEFAULT_RECONCILE_MS);
+    this._reconcileMs = Number.isFinite(reconcileMs) && reconcileMs > 0 ? reconcileMs : DEFAULT_RECONCILE_MS;
+    // A disposable watcher checkpoint, separate from the SQLite index. It lets
+    // boot reconciliation detect offline edits/deletions without loading SQLite.
+    this._maintenanceStatePath = this._childData.databasePath
+      ? `${this._childData.databasePath}.maintenance.json` : null;
+    this._sourceSignature = null;
+    this._syncedSourceSignature = null;
+    try {
+      const saved = JSON.parse(fs.readFileSync(this._maintenanceStatePath, 'utf8'));
+      if (saved.version === 1 && fs.existsSync(this._childData.databasePath)) this._syncedSourceSignature = saved.signature;
+    } catch {}
+    // Background syncs start at most this often. Every live agent appends to
+    // its transcript several times a second, and each sync walks every source
+    // root and re-parses each changed transcript in full; unthrottled, the
+    // child ran one sync after another and held a core plus the disk forever.
+    this._syncMinIntervalMs = Math.max(0, Number(options.syncMinIntervalMs ?? 10_000));
+    this._child = null;
+    this._stderrTail = [];
+    this._nextId = 0;
+    this._pending = new Map();
+    this._closed = false;
+    this._watchers = new Map();
+    this._queuedSources = new Set();
+    this._queuedSnapshot = null;
+    this._lastSyncStartedAt = 0;
+    this._maintenanceTimer = null;
+    this._reconcileTimer = null;
+    this._queueTimer = null;
+    this._maintenanceBusy = false;
+    this._status = {
+      phase: 'idle', ready: false, refreshing: false,
+      index: { sessions: 0, documents: 0, terms: 0, providers: {}, storage: 'sqlite-child-process' },
+    };
+    this._stats = { submitted: 0, completed: 0, workerRestarts: 0, failures: 0 };
+    // 大块后台活。主进程在第一次建好之前把后台同步（会话说完一轮、记录文件变化触发的那些）先压住，
+    this._backgroundHeld = options.holdBackground === true && this._prewarmEnabled;
+    // 索引没建好期间阶段变化、以及第一次建好时回调一次，主进程写进 window-events.log，
+    // 出事时能直接对上当时是不是正在建索引。
+    this._onStatusChange = typeof options.onStatusChange === 'function' ? options.onStatusChange : null;
+  }
+
+  _setStatus(next) {
+    const prev = this._status;
+    this._status = next;
+    if (!this._onStatusChange) return;
+    const progressed = prev.ready !== next.ready || (!next.ready && (prev.phase !== next.phase || !!prev.refreshing !== !!next.refreshing));
+    if (!progressed) return;
+    try { this._onStatusChange(next, prev); } catch {}
+  }
+
+  get backgroundHeld() { return this._backgroundHeld; }
+
+  releaseBackground() {
+    if (!this._backgroundHeld) return;
+    this._backgroundHeld = false;
+    if (!this._closed && this._queuedSnapshot && !this._queueTimer && !this._maintenanceBusy) this._scheduleQueueFlush(400);
+  }
+
+  _armRequestTimeout(id, pending) {
+    clearTimeout(pending.timer);
+    pending.timer = setTimeout(() => {
+      if (this._pending.get(id) !== pending) return;
+      const error = new Error(`Session search child did not respond for ${this._requestTimeoutMs}ms (${pending.type})`);
+      this._handleFailure(error, this._child);
+    }, this._requestTimeoutMs);
+    pending.timer.unref?.();
+  }
+
+  _touchPendingRequests() {
+    for (const [id, pending] of this._pending) this._armRequestTimeout(id, pending);
+  }
+
+  _armIdleTimer() {
+    clearTimeout(this._idleTimer);
+    this._idleTimer = null;
+    if (!this._idleMs || this._closed || !this._child || this._idleStopping || this._pending.size
+        || this._maintenanceBusy || this._queuedSnapshot || this._status.refreshing || this._childBusy) return;
+    this._idleTimer = setTimeout(() => {
+      this._idleTimer = null;
+      if (this._closed || this._pending.size || this._maintenanceBusy || this._queuedSnapshot
+          || this._status.refreshing || this._childBusy) return;
+      const child = this._child;
+      this._child = null;
+      this._setStatus({ ...this._status, runtime: undefined });
+      this._idleStopping = this._stopChild(child).catch(error => {
+        this._setStatus({ ...this._status, lastError: error.message });
+      }).finally(() => { this._idleStopping = null; });
+    }, this._idleMs);
+    this._idleTimer.unref?.();
+  }
+
+  _ensureChild() {
+    if (this._closed) throw new Error('Session search service is closed');
+    if (this._child) return this._child;
+    if (this._closingChild) throw new Error('历史索引进程尚未确认退出，请稍后重试');
+    this._childBusy = false;
+    this._setStatus({ ...this._status, phase: 'discovering', refreshing: true, lastError: null });
+    this._stderrTail = [];
+    const child = this._fork(this._childPath, [], {
+      // Do not set cwd to __dirname: in packaged builds it points inside
+      // app.asar, which is not a real Windows working directory.
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', NODE_NO_WARNINGS: '1' },
+      execArgv: [`--max-old-space-size=${this._childMemoryLimitMb}`],
+      windowsHide: true,
+      serialization: 'advanced',
+      stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+    });
+    this._childBoosted = false;
+    this._applyChildPriority(child, PRIORITY.PRIORITY_BELOW_NORMAL);
+    child.on('message', message => { if (this._child === child) this._handleMessage(message); });
+    child.on('error', error => this._handleFailure(error, child));
+    child.on('exit', (code, signal) => {
+      if (this._child !== child) return;
+      const detail = this._stderrTail.slice(-8).join('\n');
+      const error = new Error(`Session search child exited (code=${code}, signal=${signal || 'none'})${detail ? `\n${detail}` : ''}`);
+      this._handleFailure(error, child);
+    });
+    if (child.stderr) {
+      child.stderr.on('data', data => {
+        this._stderrTail.push(...String(data || '').split(/\r?\n/).filter(Boolean));
+        if (this._stderrTail.length > 80) this._stderrTail.splice(0, this._stderrTail.length - 80);
+      });
+    }
+    this._child = child;
+    this._stats.workerRestarts += 1;
+    try {
+      child.send({ type: 'init', options: this._childData }, error => {
+        if (error) this._handleFailure(error, child);
+      });
+    } catch (error) {
+      this._handleFailure(error, child);
+      throw error;
+    }
+    return child;
+  }
+
+  _applyChildPriority(child, priority) {
+    if (!child || !Number.isInteger(child.pid) || !Number.isInteger(priority)) return false;
+    try { this._setPriority(child.pid, priority); return true; } catch { return false; }
+  }
+
+  _boostChild() {
+    clearTimeout(this._unboostTimer);
+    this._unboostTimer = null;
+    if (this._childBoosted || !this._child) return;
+    if (this._applyChildPriority(this._child, PRIORITY.PRIORITY_NORMAL)) this._childBoosted = true;
+  }
+
+  _scheduleUnboost() {
+    if (!this._childBoosted || this._unboostTimer) return;
+    for (const pending of this._pending.values()) if (pending.interactive) return;
+    this._unboostTimer = setTimeout(() => {
+      this._unboostTimer = null;
+      for (const pending of this._pending.values()) if (pending.interactive) return;
+      if (!this._child || !this._childBoosted) return;
+      // 降级失败（进程刚退出、权限抖动）时保留「已升级」标记，隔一个保持期再试，最多 3 次；
+      // 不把标记清掉，否则进程实际停在 NORMAL、之后再也不会被降回去。
+      if (this._applyChildPriority(this._child, PRIORITY.PRIORITY_BELOW_NORMAL)) { this._childBoosted = false; this._unboostRetries = 0; return; }
+      if ((this._unboostRetries = (this._unboostRetries || 0) + 1) < 3) this._scheduleUnboost();
+      else this._unboostRetries = 0; // 标记留着：下一次交互搜索结束后会再试
+    }, this._boostHoldMs);
+    this._unboostTimer.unref?.();
+  }
+
+  _handleMessage(message) {
+    if (message && message.type === 'status') {
+      this._setStatus({ ...this._status, ...(message.status || {}) });
+      this._childBusy = message.status?.runtime?.busy === true;
+      this._touchPendingRequests();
+      this._armIdleTimer();
+      return;
+    }
+    if (message && message.type === 'fatal') {
+      this._setStatus({ ...this._status, refreshing: false, lastError: message.error || '搜索子进程异常退出' });
+      return;
+    }
+    const pending = message && this._pending.get(message.id);
+    if (!pending) return;
+    this._pending.delete(message.id);
+    clearTimeout(pending.timer);
+    if (pending.interactive) this._scheduleUnboost();
+    if (message.error) {
+      pending.reject(new Error(message.error));
+      this._armIdleTimer();
+      return;
+    }
+    this._stats.completed += 1;
+    if (message.result && (pending.type === 'status' || pending.type === 'refresh')) {
+      this._setStatus({ ...this._status, ...message.result });
+    } else if (pending.type === 'search' && message.result && message.result.status) {
+      this._setStatus({ ...this._status, ...message.result.status });
+    }
+    pending.resolve(message.result);
+    this._armIdleTimer();
+  }
+
+  _handleFailure(error, child) {
+    if (child && this._child !== child) return;
+    const failedChild = this._child;
+    if (failedChild) {
+      failedChild.removeAllListeners();
+      try { if (failedChild.connected) failedChild.kill(); } catch {}
+    }
+    this._child = null;
+    clearTimeout(this._idleTimer);
+    clearTimeout(this._unboostTimer);
+    this._unboostTimer = null;
+    this._childBoosted = false;
+    this._childBusy = false;
+    this._stats.failures += 1;
+    this._setStatus({ ...this._status, ready: false, refreshing: false, phase: 'child_error', lastError: error.message });
+    for (const pending of this._pending.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(error);
+    }
+    this._pending.clear();
+  }
+
+  _request(type, payload = {}) {
+    if (this._idleStopping) return this._idleStopping.then(() => this._request(type, payload));
+    clearTimeout(this._idleTimer);
+    const id = ++this._nextId;
+    return new Promise((resolve, reject) => {
+      const pending = { type, resolve, reject, timer: null, interactive: INTERACTIVE_REQUESTS.has(type) };
+      this._pending.set(id, pending);
+      this._armRequestTimeout(id, pending);
+      try {
+        const child = this._ensureChild();
+        if (pending.interactive) this._boostChild();
+        child.send({ id, type, ...payload }, error => {
+          if (!error) return;
+          this._handleFailure(error, child);
+        });
+        this._stats.submitted += 1;
+      } catch (error) {
+        this._pending.delete(id);
+        clearTimeout(pending.timer);
+        reject(error);
+      }
+    });
+  }
+
+  // 会话快照（生产 2400+ 个会话、约 5MB）只用于搜索进程顺带触发的刷新，而它在
+  // refreshTtlMs 内本来就不会刷新。以前每敲一次键都在主进程组装、序列化一份发过去
+  // （实测约 25ms + 5MB 跨进程拷贝）；现在只在可能用到时才带上，其余时候传 null，
+  // 搜索进程见 null 就不发起刷新（后台同步另有 queueRefresh 负责）。2026-11-19。
+  search(request = {}, snapshot = {}) {
+    const now = Date.now();
+    const due = !this._status.ready || now - (this._searchSnapshotSentAt || 0) >= this._childData.refreshTtlMs;
+    let payload = null;
+    if (due) {
+      payload = typeof snapshot === 'function' ? snapshot() : snapshot;
+      this._searchSnapshotSentAt = now;
+    }
+    return this._request('search', { request, snapshot: payload });
+  }
+
+  preview(request = {}) {
+    return this._request('preview', { request });
+  }
+
+  memoryCandidates(request = {}) { return this._request('memory-candidates', { request }); }
+  transcriptFor(request = {}) { return this._request('transcript', { request }); }
+  exportMemoryHistory(request = {}) { return this._request('memory-export', { request }); }
+
+  refresh(snapshot = {}, options = {}) {
+    return this._request('refresh', { snapshot, force: options.force === true, immediate: options.immediate === true });
+  }
+
+  // `snapshot` may be a getter: it is only called when a sync actually starts,
+  // not on each of the many file events that coalesce into that sync.
+  queueRefresh(snapshot = {}, source = 'reconcile') {
+    if(this._closed) return;
+    clearTimeout(this._idleTimer);
+    this._queuedSnapshot = snapshot;
+    this._queuedSources.add(String(source || 'reconcile'));
+    if(this._backgroundHeld || this._queueTimer || this._maintenanceBusy) return;
+    this._scheduleQueueFlush(400);
+  }
+
+  _scheduleQueueFlush(minDelayMs) {
+    const delay=Math.max(minDelayMs,this._lastSyncStartedAt+this._syncMinIntervalMs-Date.now());
+    this._queueTimer=setTimeout(()=>{this._queueTimer=null;void this._flushRefreshQueue();},delay);
+    this._queueTimer.unref?.();
+  }
+
+  async _flushRefreshQueue() {
+    if(this._closed || this._maintenanceBusy || !this._queuedSnapshot) return;
+    this._maintenanceBusy=true;
+    this._lastSyncStartedAt=Date.now();
+    const queued=this._queuedSnapshot;this._queuedSnapshot=null;this._queuedSources.clear();
+    const signature = this._sourceSignature;
+    let snapshot=queued,retry=false;
+    try {
+      if(typeof queued==='function') snapshot=queued();
+      const status=await this.refresh(snapshot,{immediate:true});
+      retry=status?.phase==='waiting_writer';
+      if (!retry && status?.ready && !status?.lastError && !status?.staleSources && signature) {
+        this._syncedSourceSignature = signature;
+        if (this._maintenanceStatePath) {
+          // Cache loss only causes an extra reconciliation, never lost content.
+          const temporary = `${this._maintenanceStatePath}.${process.pid}.tmp`;
+          try {
+            await fs.promises.writeFile(temporary, JSON.stringify({ version: 1, signature }), 'utf8');
+            await fs.promises.rename(temporary, this._maintenanceStatePath);
+          } catch { try { await fs.promises.unlink(temporary); } catch {} }
+        }
+      }
+    } catch(error) {
+      retry=true;
+      this._setStatus({...this._status,phase:this._status.ready?'ready_with_errors':'error',refreshing:false,lastError:error.message});
+      console.warn('[session-search] background sync failed:',error.message);
+    } finally {
+      this._maintenanceBusy=false;
+      if(retry && !this._queuedSnapshot) this._queuedSnapshot=queued;
+      if(!this._closed && !this._backgroundHeld && this._queuedSnapshot) this._scheduleQueueFlush(retry?2000:400);
+      this._armIdleTimer();
+    }
+  }
+
+  startMaintenance(getSnapshot) {
+    if(this._closed || this._maintenanceTimer || !this._prewarmEnabled) return;
+    // The minute tick must stay disk-free: thousands of awaited stat calls
+    // still consume main-thread CPU. Only recover already queued increments.
+    this._maintenanceTimer = setInterval(() => {
+      if (!this._closed && !this._backgroundHeld && this._queuedSnapshot
+          && !this._queueTimer && !this._maintenanceBusy) this._scheduleQueueFlush(400);
+    }, 60_000);
+    this._maintenanceTimer.unref?.();
+    const reconcile = () => {
+      if (this._closed || this._reconcileBusy) return;
+      // Watcher setup/recovery may touch disk, so it shares the infrequent
+      // full reconciliation schedule rather than the minute queue check.
+      this._watchSourceRoots(this._sourceRoots(), getSnapshot);
+      void this._reconcileSources(getSnapshot);
+    };
+    this._reconcileTimer = setInterval(reconcile, this._reconcileMs);
+    this._reconcileTimer.unref?.();
+    reconcile();
+  }
+
+  _watchSourceRoots(roots, getSnapshot) {
+    for (const root of roots) {
+      if (this._watchers.has(root) || !fs.existsSync(root)) continue;
+      try {
+        const watcher = fs.watch(root, { recursive: true, persistent: false }, (_event, file) => {
+          if (!file || /\.(jsonl|json)$/i.test(String(file))) this.queueRefresh(getSnapshot, path.join(root, String(file || '')));
+        });
+        watcher.on('error', error => {
+          watcher.close(); this._watchers.delete(root);
+          this._status = { ...this._status, watchError: error.message };
+          console.warn('[session-search] source watcher failed; periodic reconciliation remains active:', error.message);
+        });
+        this._watchers.set(root, watcher);
+      } catch (error) {
+        this._status = { ...this._status, watchError: error.message };
+        console.warn('[session-search] watch unavailable:', error.message);
+      }
+    }
+  }
+
+  _sourceRoots(snapshot = {}) {
+    return [...new Set([
+      ...this._childData.claudeRoots, ...this._childData.codeagentRoots,
+      ...this._childData.codexRoots, ...this._childData.kimiRoots,
+      ...this._childData.geminiRoots,
+      ...this._childData.geminiRoots.map(root => path.join(path.dirname(root), 'antigravity-cli', 'brain')),
+      this._childData.meetingDir,
+      ...(snapshot.sessions || []).map(s => s.codexSessionsRoot),
+      ...(snapshot.sessions || []).map(s => s.antigravityProfileHome ? path.join(s.antigravityProfileHome, '.gemini', 'antigravity-cli', 'brain') : null),
+    ].filter(Boolean))];
+  }
+
+  async _reconcileSources(getSnapshot) {
+    if (this._closed || this._reconcileBusy) return;
+    this._reconcileBusy = true;
+    try {
+      const snapshot = getSnapshot();
+      const roots = this._sourceRoots(snapshot);
+      const files = new Map();
+      let processedFiles = 0;
+      const scan = async file => {
+        let stat;
+        try { stat = await fs.promises.stat(file); }
+        catch (error) { if (error.code === 'ENOENT') return; throw error; }
+        if (stat.isDirectory()) {
+          const entries = await fs.promises.readdir(file, { withFileTypes: true });
+          // Follow a configured root junction, matching engine discovery, but
+          // do not follow nested symlinks into cycles or unrelated directories.
+          for (const entry of entries) {
+            if (this._closed) return;
+            if (entry.isDirectory() || (entry.isFile() && /\.(jsonl|json)$/i.test(entry.name))) await scan(path.join(file, entry.name));
+          }
+        } else if (stat.isFile() && /\.(jsonl|json)$/i.test(file)) {
+          files.set(path.resolve(file), `${stat.size}:${stat.mtimeMs}`);
+          if (++processedFiles % RECONCILE_YIELD_EVERY === 0) {
+            await new Promise(resolve => setImmediate(resolve));
+          }
+        }
+      };
+      for (const root of roots) await scan(root);
+      for (const session of snapshot.sessions || []) {
+        const file = session.transcriptPath || session.resumeTranscriptPath;
+        if (file) await scan(file);
+      }
+      // Match searchable metadata, excluding volatile runtime/status fields.
+      const metadata = rows => (rows || []).map(row => Object.fromEntries([
+        'hubId', 'id', 'title', 'cwd', 'transcriptPath', 'resumeTranscriptPath',
+        'workspaceLabel', 'kind', 'workspace', 'subSessions', 'slotSpecs', 'groupChat',
+        'meetingId', 'currentModel', 'model', 'codexSessionsRoot', 'codexProfile',
+        'antigravityProfile', 'antigravityProfileHome', 'antigravityProfileLabel',
+        'lastMessageTime', 'lastCompletedAt', 'lastOutputPreview', 'ccSessionId',
+        'codexSid', 'createdAt', 'updatedAt',
+      ].map(key => [key, row[key] ?? null]))).sort((a, b) => String(a.hubId || a.id).localeCompare(String(b.hubId || b.id)));
+      const signature = createHash('sha256').update(JSON.stringify({
+        build: require('../package.json').version,
+        options: this._childData, roots: roots.sort(), files: [...files].sort(([a], [b]) => a.localeCompare(b)),
+        sessions: metadata(snapshot.sessions), meetings: metadata(snapshot.meetings),
+      })).digest('hex');
+      if (this._closed) return;
+      this._sourceSignature = signature;
+      // No sources and no prior index means there is no indexing work at boot.
+      const hasWork = files.size || snapshot.sessions?.length || snapshot.meetings?.length
+        || (this._childData.databasePath && fs.existsSync(this._childData.databasePath));
+      if (hasWork && signature !== this._syncedSourceSignature) this.queueRefresh(getSnapshot);
+    } catch (error) {
+      if (!this._closed) {
+        this._status = { ...this._status, watchError: error.message };
+        // A failed metadata probe must not disable the existing recovery path.
+        this.queueRefresh(getSnapshot, 'reconcile-error');
+      }
+    } finally { this._reconcileBusy = false; }
+  }
+
+  status() {
+    // 2026-08-28：以前这里往子进程发一次 'status' 往返。子进程是单线程的，重建索引
+    // 时（本机 2400+ 个来源要几分钟）这条请求会排在整批解析后面，于是搜索弹窗顶上
+    // 一直停在「正在读取本地索引…」，看起来像卡死 —— 用户就是这么反馈的。
+    //
+    // 但 this._status 本来就是**实时**的：子进程在 indexing 过程中会主动 push
+    // {type:'status'}（见 _handleChildMessage）。直接返回缓存即可，永远不会被阻塞。
+    //
+    // Status polling is observational: it must never start or keep a worker alive.
+    // The first actual query/refresh reports discovering through the existing UI.
+    return Promise.resolve({ ...this._status });
+  }
+
+  prewarm(snapshot = {}) {
+    if (!this._prewarmEnabled) {
+      this._status = { ...this._status, phase: 'deferred', ready: false, refreshing: false, lastError: null };
+      return Promise.resolve({ ...this._status });
+    }
+    return this.refresh(snapshot, { force: false });
+  }
+
+  getStats() {
+    return {
+      ...this._stats,
+      childRestarts: this._stats.workerRestarts,
+      pending: this._pending.size,
+      status: { ...this._status },
+    };
+  }
+
+  async close() {
+    if (this._closed && !this._closingChild) return;
+    this._closed = true;
+    clearInterval(this._maintenanceTimer);clearTimeout(this._queueTimer);
+    clearInterval(this._reconcileTimer);
+    clearTimeout(this._idleTimer);
+    clearTimeout(this._unboostTimer); this._unboostTimer = null;
+    for(const watcher of this._watchers.values()) watcher.close();
+    this._watchers.clear();this._queuedSources.clear();this._queuedSnapshot=null;
+    const error = new Error('Session search service closed');
+    for (const pending of this._pending.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(error);
+    }
+    this._pending.clear();
+    if (this._idleStopping) await this._idleStopping;
+    const child = this._closingChild || this._child;
+    this._child = null;
+    if (!child) return;
+    await this._stopChild(child);
+  }
+
+  async _stopChild(child) {
+    if (!child) return;
+    this._closingChild = child;
+    if (child.exitCode !== null && child.exitCode !== undefined) { this._closingChild = null; return; }
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      let exitTimer;
+      const finish = () => { this._closingChild = null; if (settled) return; settled = true; clearTimeout(timer); clearTimeout(exitTimer); resolve(); };
+      const terminate = () => {
+        if (settled || exitTimer) return;
+        // A kill request is not exit confirmation. A replacement Hub must not
+        // migrate the shared search index while this writer is still alive.
+        exitTimer=setTimeout(() => {
+          if (settled) return;
+          settled=true;clearTimeout(timer);
+          reject(new Error('历史索引进程尚未确认退出，取消重启'));
+        },5000);
+        try { child.kill(); }
+        catch(error) { settled=true;clearTimeout(timer);clearTimeout(exitTimer);reject(error); }
+      };
+      const timer = setTimeout(() => {
+        terminate();
+      }, 2000);
+      timer.unref?.();
+      child.once('exit', finish);
+      try { child.send({ type: 'close' }, error => { if (error) terminate(); }); }
+      catch { terminate(); }
+    });
+  }
+}
+
+module.exports = { SessionSearchService };

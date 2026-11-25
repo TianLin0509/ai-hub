@@ -1,0 +1,44 @@
+{
+  "edition": "community",
+  "target": "clean",
+  "repo": "TianLin0509/ai-hub",
+  "features": {
+    "assistant": true,
+    "progressPage": false,
+    "wirelessSessions": false,
+    "hubRules": true,
+    "completionNotification": false,
+    "desktopOrganizer": false,
+    "personalNames": false,
+    "memberUpgrade": false,
+    "leadTeam": true,
+    "companyAssistant": false,
+    "companyForum": false,
+    "hubPet": false,
+    "accountInfra": false,
+    "serverMonitor": false,
+    "advancedGroupChat": false,
+    "devGroupScene": false,
+    "appearanceOnline": false
+  },
+  "kinds": [
+    "claude",
+    "codex",
+    "deepseek",
+    "kimi",
+    "qwen",
+    "glm",
+    "gemini",
+    "powershell"
+  ],
+  "productName": "AI Hub",
+  "shortcutName": "AI Hub",
+  "releaseNotes": [
+    "AI Hub 纯净版：多 AI 会话、群聊与账号管理，使用你自己的 AI 账号。",
+    "带前台助理（中性默认人设与通用规则，可自行修改）与 hub 命令组队；随包附 hub-driver skill。"
+  ],
+  "version": "1.0.0",
+  "upstreamVersion": "1.6.986",
+  "upstreamCommit": "0a453601ce310dcb7849091533abb3e4da0835f9",
+  "upstreamDirty": false
+}

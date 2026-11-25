@@ -1,0 +1,271 @@
+/* Assistant changes appearance only; ordinary cards, composer and PTY own behavior. */
+#btn-assistant .btn-icon img{width:26px;height:28px;object-fit:contain}
+#btn-assistant.assistant-has-unread .btn-label:after{content:'';display:inline-block;width:6px;height:6px;background:#ff755c;border-radius:50%;margin:0 0 7px 6px}
+#terminal-panel.assistant-session{--bg-primary:#fbfcff;--bg-secondary:#fff;--text-primary:#1b2942;--text-secondary:#63728a;--text-muted:#77859b;--border-color:#dfe6f1;--surface-canvas:#fbfcff;--surface-card:#fff;--surface-raised:#fff;--surface-overlay:#f3f6fc;--surface-sunken:#f5f7fc;--fg-strong:#1b2942;--fg-default:#1b2942;--fg-muted:#63728a;--fg-subtle:#77859b;--border-subtle:#e1e7f1;--border-mid:#dfe6f1;--conversation-text:#1b2942;--conversation-muted:#63728a;background:#fbfcff;color:#1b2942;color-scheme:light}
+#terminal-panel.assistant-session #msg-overlay{background:#fbfcff;color:#1b2942}
+#terminal-panel.assistant-session .turn-card{background:#fff;border-color:#e1e7f1;color:#1b2942}
+#terminal-panel.assistant-session .turn-card.user{background:#edf4ff;border-color:#dfe9f9}
+#terminal-panel.assistant-session .turn-body,#terminal-panel.assistant-session .turn-body p,#terminal-panel.assistant-session .turn-who{color:#1b2942}
+#terminal-panel.assistant-session .turn-time,#terminal-panel.assistant-session .turn-avatar,#terminal-panel.assistant-session .ta-btn,#terminal-panel.assistant-session .card-actions-more{color:#64748b}
+#terminal-panel.assistant-session .turn-avatar.av-logo{background:transparent}
+#terminal-panel.assistant-session .turn-avatar.av-logo img{width:100%;height:100%;object-fit:contain}
+#terminal-panel.assistant-session .floating-input-bar{background:#fff;border-color:#dfe6f1;color:#1b2942}
+#terminal-panel.assistant-session .floating-input-box{color:#1b2942;background:#fff}
+#terminal-panel.assistant-session .session-welcome{color:#1b2942;background:transparent}
+#terminal-panel.assistant-session .session-welcome-mark{background:transparent;border:0;box-shadow:none}
+#terminal-panel.assistant-session .session-welcome-mark img{width:72px;height:84px;object-fit:contain}
+.assistant-workbench.btn-zoom,.assistant-phone.btn-zoom,.assistant-memory.btn-zoom,.assistant-rotate.btn-zoom{width:auto;flex-shrink:0;white-space:nowrap;padding:0 8px}
+.app-toolbar .terminal-header-actions .assistant-phone.btn-zoom,.app-toolbar .terminal-header-actions .assistant-workbench.btn-zoom,.app-toolbar .terminal-header-actions .assistant-memory.btn-zoom,.app-toolbar .terminal-header-actions .assistant-rotate.btn-zoom{width:auto;min-width:72px;flex-shrink:0;white-space:nowrap;padding:0 8px}
+dialog.assistant-phone-dialog{margin:auto;font:14px/1.7 var(--font-ui,system-ui,sans-serif);box-shadow:0 20px 70px #172f5126;-webkit-app-region:no-drag}
+.assistant-phone-dialog::backdrop{background:#15233a45}
+.assistant-phone-dialog h2{font-size:22px;line-height:1.4;margin-bottom:14px}
+.assistant-phone-dialog p{margin:12px 0}
+.assistant-phone-dialog a{color:#315acb}
+.assistant-phone-dialog button{padding:8px 12px;border:1px solid #dfe6f1;border-radius:8px;background:#f6f9ff;color:#1b2942;font:inherit;cursor:pointer}
+.assistant-phone-dialog button:hover{background:#edf4ff}
+.assistant-phone-dialog button:disabled{opacity:.55;cursor:wait}
+.assistant-phone-dialog .phone-code{padding:10px;border:1px solid #dfe6f1;border-radius:8px;background:#f6f9ff;color:#1b2942}
+.assistant-backend{display:none;-webkit-app-region:no-drag;max-width:100px;padding:6px 8px;border:1px solid #dfe6f1;border-radius:8px;background:#fff;color:#315acb;font-size:12px;flex-shrink:0}
+body.assistant-session-active .assistant-backend{display:block}
+.assistant-backend:disabled{opacity:.55}
+.assistant-backend-menu{position:fixed;z-index:2500;padding:5px;background:#fff;color:#1b2942;border:1px solid #dfe6f1;border-radius:10px;box-shadow:0 6px 22px #172f5120;-webkit-app-region:no-drag;min-width:125px;max-height:65vh;overflow-y:auto}
+.assistant-backend-menu button{display:block;width:100%;padding:8px 16px;border:0;border-radius:6px;text-align:left;background:transparent;color:inherit;cursor:pointer}
+.assistant-backend-menu button:hover,.assistant-backend-menu button:focus{background:#edf4ff}
+#terminal-panel.assistant-session .assistant-notifications{flex-shrink:0;white-space:nowrap}
+#terminal-panel.assistant-session .turn-body a{color:#315acb}
+#terminal-panel.assistant-session .turn-body{background:transparent}
+#terminal-panel.assistant-session .turn-result-glance-row strong{color:#315acb}
+#terminal-panel.assistant-session .composer{background:#fff;color:#1b2942;border-color:#dfe6f1}
+#terminal-panel.assistant-session .composer .composer-secondary-actions button,#terminal-panel.assistant-session .composer .composer-chip,#terminal-panel.assistant-session .composer .composer-model{color:#4b607d}
+#terminal-panel.assistant-session .composer-status,#terminal-panel.assistant-session .composer-status-text,#terminal-panel.assistant-session .composer-status-detail{color:#63728a}
+#terminal-panel.assistant-session .composer[data-state='waiting'] :is(.composer-status,.composer-status-text,.composer-status-detail){color:#925000}
+#terminal-panel.assistant-session .composer[data-state='dead'] :is(.composer-status,.composer-status-text,.composer-status-detail){color:#b42318}
+#terminal-panel.assistant-session .composer-status-action{color:#315acb}
+.assistant-notifications{position:relative;font-size:12px;color:var(--text-primary);-webkit-app-region:no-drag}
+.assistant-notice-list{-webkit-app-region:no-drag;user-select:text}
+.assistant-notifications summary{cursor:pointer;list-style:none;padding:7px 10px;border:1px solid var(--border-color);border-radius:8px}
+.assistant-notice-list{position:absolute;right:0;top:36px;width:min(420px,75vw);max-height:65vh;overflow:auto;background:#fff;color:#1b2942;border:1px solid #dfe6f1;border-radius:12px;padding:16px;z-index:1000;box-shadow:0 6px 22px #172f5120}
+.assistant-notice-list article+article{border-top:1px solid #e1e7f1;padding-top:12px;margin-top:12px}
+.assistant-notice-list p{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.8}
+.assistant-notice-list small{color:#77859b;overflow-wrap:anywhere}.assistant-notice-list button{margin-left:12px}
+.assistant-turn-context{font-size:11px;color:#77859b}.assistant-turn-context pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:200px;overflow:auto}
+/*
+   本页铺满导航栏右边，左右两栏不透明、中间镂空；会话那一栏靠 body.assistant-stage 下的 --ap-stage-ml / --ap-stage-mr 让位（assistant-page.js 的 place() 算）。 */
+.assistant-page{--ap-bg:#f3f2f7;--ap-ink:#221d2e;--ap-ink2:#575166;--ap-ink3:#9590a3;--ap-line:#e8e6ef;--ap-soft:#f7f6fa;--ap-track:#e9e6f0;--ap-acc:#5b3a8c;--ap-acc-soft:#efeaf7;--ap-red:#e2474b;--ap-amber:#c27a1a;
+  position:fixed;left:0;right:0;top:44px;bottom:0;z-index:880;pointer-events:none;color:var(--ap-ink);font:14px/1.6 "Microsoft YaHei UI","Microsoft YaHei","Segoe UI",sans-serif;-webkit-app-region:no-drag}
+.assistant-page[hidden]{display:none}
+.assistant-page *{box-sizing:border-box}
+.assistant-page button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.assistant-page button:focus-visible{outline:2px solid var(--ap-acc);outline-offset:2px;border-radius:8px}
+.ap-ic{width:16px;height:16px;flex:none}
+.ap-shell{height:100%;display:grid;grid-template-columns:var(--ap-lw,262px) minmax(0,1fr) var(--ap-rw,236px)}
+.ap-side,.ap-right{pointer-events:auto;min-height:0;background:var(--ap-bg)}
+.ap-hole{pointer-events:none}
+.assistant-page.no-right .ap-right{display:none}
+/* 助理页开着：会话栏和账号看板让出来；雾白底；中间会话是白纸大卡。 */
+.assistant-page-open #session-sidebar{visibility:hidden}
+body.assistant-page-open .account-quota-panel{display:none!important}
+.assistant-page-open #btn-expand-sidebar{visibility:hidden}
+/* 简洁顶栏（style-31 返工）：助理页只留品牌、版本和导航开关；会话工具（关注回复、工作档案、助理记忆、手机连接、新开助理、后端切换、
+   问一下、分屏、沉浸、更多等）和面包屑都收起，只留导航开关、品牌版本与窗口按钮，后台用左栏「后台」按钮。离开助理页 body 去掉这个类，顶栏原样回来。 */
+body.assistant-page-open #app-toolbar>:not(#btn-toggle-navigation):not(#hub-identity):not(#toolbar-window-controls){visibility:hidden;pointer-events:none}
+body.assistant-stage .session-workspace{margin-left:var(--ap-stage-ml,0px);margin-right:var(--ap-stage-mr,0px)}
+/* 中间：雾白底上的白纸大卡（圆角 24、柔和投影、上下留白），输入框发送键用茄紫。 */
+body.assistant-stage .session-workspace{background:#f3f2f7}
+body.assistant-stage .terminal-panel{--stage-card-inset-top:14px;--stage-card-inset-right:0px;--stage-card-radius:24px}
+body.assistant-stage .terminal-panel:not(.home-active){margin-bottom:14px;border-radius:24px;overflow:hidden;background:#fff;box-shadow:0 1px 2px rgba(40,30,70,.05),0 20px 50px -30px rgba(40,30,70,.25)}
+body.assistant-stage .terminal-panel:not(.home-active) .terminal-container{border-radius:24px}
+body.assistant-stage #terminal-panel .floating-input-send{background:#5b3a8c;border-color:#5b3a8c;color:#fff}
+
+/* ---------- 左栏 ---------- */
+.ap-side{display:flex;flex-direction:column;padding:22px 14px 12px 12px}
+.ap-id{flex:none}
+.ap-id-head{display:flex;align-items:center;gap:14px;width:100%;padding:4px;margin:-4px;border-radius:16px;text-align:left}
+.ap-id-head:hover{background:#fff}
+.ap-id-head[aria-current="true"] .ap-badge-mark{box-shadow:0 0 0 3px var(--ap-acc-soft)}
+.ap-badge-mark{width:48px;height:48px;border-radius:16px;background:var(--ap-acc);color:#fff;display:grid;place-items:center;flex:none}
+.ap-badge-mark .ap-ic{width:24px;height:24px}
+.ap-id-name{display:flex;flex-direction:column;min-width:0}
+.ap-who{font-size:38px;font-weight:700;letter-spacing:4px;line-height:1.05;color:var(--ap-ink)}
+.ap-st{display:flex;align-items:center;gap:7px;font-size:12.5px;margin-top:5px;color:var(--ap-ink3);white-space:nowrap}
+.ap-st i{width:7px;height:7px;border-radius:50%;background:#bdb8c9;flex:none}
+.ap-st.ok{color:#2a8a5a}.ap-st.ok i{background:#2fb06b;box-shadow:0 0 0 3px rgba(47,176,107,.15)}
+.ap-st.run{color:var(--ap-acc)}.ap-st.run i{background:var(--ap-acc);animation:ap-pulse 1.4s infinite ease-in-out}
+.ap-st.wait{color:var(--ap-amber)}.ap-st.wait i{background:var(--ap-amber)}
+.ap-st.bad{color:var(--ap-red)}.ap-st.bad i{background:var(--ap-red)}
+@keyframes ap-pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.ap-meta{margin:16px 0 0;display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font-size:12.5px}
+.ap-meta dt{color:var(--ap-ink3)}.ap-meta dd{margin:0;color:var(--ap-ink);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ap-acts{display:flex;gap:8px;margin-top:14px}
+.assistant-page .ap-btn{height:32px;padding:0 12px;border-radius:11px;background:#fff;display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ap-ink2);box-shadow:0 0 0 1px var(--ap-line)}
+.assistant-page .ap-btn:hover{box-shadow:0 0 0 1px #d6d2e0}
+.assistant-page .ap-btn[aria-pressed="true"]{background:var(--ap-acc-soft);color:var(--ap-acc);box-shadow:0 0 0 1px #d9cfee}
+.ap-btn .ap-ic{width:15px;height:15px}
+.ap-sum{margin:14px 0 0;font-size:12.5px;line-height:1.85;color:var(--ap-ink2)}
+.ap-sum b{color:var(--ap-ink);font-weight:600}
+.ap-rd{display:inline-block;flex:none;width:7px;height:7px;border-radius:50%;background:var(--ap-red);margin:0 4px 1px 2px}
+.ap-list{flex:1;min-height:0;margin-top:14px;overflow-y:auto;overflow-x:hidden;scrollbar-width:none}
+.ap-list::-webkit-scrollbar{display:none}
+.ap-group{margin-bottom:6px}
+.assistant-page .ap-group-h{display:flex;align-items:center;gap:8px;width:100%;margin:6px 0 4px;padding:0 10px;font-size:12px;font-weight:400;color:var(--ap-ink3);line-height:22px;letter-spacing:0}
+.ap-group-h b{font-weight:400}
+.ap-group-h::after{content:"";flex:1;height:1px;background:var(--ap-line);margin-left:4px}
+.assistant-page .ap-row{display:flex;align-items:center;gap:9px;width:100%;height:38px;padding:0 10px;border-radius:12px;text-align:left;font-size:13.5px;color:var(--ap-ink)}
+.assistant-page .ap-row:hover{background:#fff}
+.assistant-page .ap-row.on{background:#fff;box-shadow:0 1px 2px rgba(40,30,70,.06),0 0 0 1px var(--ap-line);font-weight:650}
+.ap-row-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ap-row time{flex:none;font-size:11.5px;color:var(--ap-ink3);font-variant-numeric:tabular-nums;font-weight:400}
+.ap-row .ap-rd{margin:0}
+.ap-tag{flex:none;font-style:normal;font-size:10.5px;line-height:17px;padding:0 6px;border-radius:6px;background:var(--ap-acc-soft);color:var(--ap-acc);font-weight:400}
+.ap-dot{flex:none;width:7px;height:7px;border-radius:50%;background:#bdb8c9}
+.ap-dot.done{background:#3a6fd8}.ap-dot.wait{background:var(--ap-amber)}.ap-dot.bad{background:var(--ap-red)}.ap-dot.idle{background:#cfcbd9}
+.ap-spin{flex:none;width:11px;height:11px;border-radius:50%;border:1.6px solid var(--ap-acc);border-right-color:transparent;animation:ap-sp 1s linear infinite}
+@keyframes ap-sp{to{transform:rotate(360deg)}}
+.assistant-page .ap-fold-sum{display:flex;align-items:center;gap:6px;width:100%;height:32px;padding:0 10px;border-radius:10px;font-size:12.5px;color:var(--ap-ink3);text-align:left}
+.ap-fold-sum span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.assistant-page .ap-fold-sum:hover{background:#fff;color:var(--ap-ink2)}
+.ap-group.open .ap-fold span::after{content:" ▾"}
+/* 分级合并（2026-11-14）：顶部「全部展开 / 全部收起」，同组会话折成一行组头（数量 · 在跑 · 红点数），点开缩进列出成员。 */
+.ap-list-bar{display:flex;align-items:center;justify-content:space-between;padding:0 6px 0 10px;font-size:12px;color:var(--ap-ink3)}
+.assistant-page .ap-foldall{height:24px;padding:0 9px;border-radius:8px;font-size:12px;color:var(--ap-acc);background:transparent}
+.assistant-page .ap-foldall:hover{background:#fff}
+.ap-gh .ap-ic{flex:none;width:13px;height:13px;color:var(--ap-ink3);transition:transform .15s}
+.ap-fg.open > .ap-gh .ap-ic{transform:rotate(90deg)}
+.assistant-page .ap-gh{font-weight:600}
+.ap-cnt{flex:none;font-style:normal;font-size:11px;line-height:17px;min-width:18px;padding:0 5px;border-radius:9px;background:#e9e7f0;color:var(--ap-ink2);text-align:center;font-weight:400}
+.ap-gs{flex:none;display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--ap-acc);font-weight:500;font-variant-numeric:tabular-nums}
+.ap-gs .ap-spin{width:9px;height:9px}
+.ap-gred{flex:none;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--ap-red);color:#fff;font-size:10.5px;line-height:16px;text-align:center;font-weight:600;font-variant-numeric:tabular-nums}
+.ap-fg-body{position:relative;margin:0 0 4px 16px;padding-left:4px;border-left:1px solid var(--ap-line)}
+.assistant-page .ap-row.ap-sub{height:32px;font-size:13px}
+/* 组队组头 = 负责人行（2026-11-15）：箭头单独一个按钮只管展开收起，其余整块是负责人会话本身，点开、选中高亮同普通行。 */
+.assistant-page .ap-gh.ap-lead{gap:0;padding:0 0 0 2px}
+.assistant-page .ap-caret{flex:none;display:grid;place-items:center;width:22px;height:28px;border-radius:7px;color:var(--ap-ink3)}
+.assistant-page .ap-caret:hover{background:var(--ap-acc-soft);color:var(--ap-acc)}
+.ap-fg.open > .ap-gh .ap-caret .ap-ic{transform:rotate(90deg)}
+.assistant-page .ap-gh-main{flex:1;min-width:0;display:flex;align-items:center;gap:9px;height:100%;padding:0 10px 0 6px;text-align:left;border-radius:0 12px 12px 0}
+.ap-none{margin:10px;color:var(--ap-ink3);font-size:12.5px;line-height:1.7}
+.ap-foot{flex:none;display:flex;align-items:center;gap:10px;padding-top:8px;font-size:11.5px;color:var(--ap-ink3);white-space:nowrap}
+.assistant-page .ap-foot-today{color:var(--ap-ink3);padding:2px 4px;border-radius:6px}
+.assistant-page .ap-foot-today:hover{color:var(--ap-ink);background:#fff}
+.ap-ver{margin-left:auto;font-variant-numeric:tabular-nums}
+
+/* ---------- 右栏 ---------- */
+.ap-right{display:flex;flex-direction:column;padding:22px 16px 14px 16px}
+.ap-seg{flex:none;display:grid;grid-template-columns:repeat(3,1fr);padding:4px;border-radius:14px;background:#e9e7f0}
+.assistant-page .ap-seg button{height:32px;border-radius:10px;font-size:13px;color:var(--ap-ink2)}
+.assistant-page .ap-seg button[aria-selected="true"]{background:#fff;color:var(--ap-ink);font-weight:650;box-shadow:0 1px 2px rgba(40,30,70,.08)}
+.ap-pane{flex:1;min-height:0;display:flex;flex-direction:column;margin-top:16px;overflow:hidden}
+.ap-ph{flex:none;display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--ap-ink3);margin:4px 0}
+.ap-ph b{font-size:13px;color:var(--ap-ink);font-weight:650;white-space:nowrap}
+.ap-ph span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ap-qlist{flex:none}
+/* 额度（2026-11-14）：直接用主页账号看板的细线表（account-quota-panel.css 的 cq-*），这里只收窄边距、换成本页底色。 */
+.ap-cq{display:flex;flex-direction:column;gap:4px;margin:0 -6px}
+.ap-cq .cq-group h3{position:static;height:24px;padding:4px 6px 0;background:transparent}
+.ap-cq .cq-columns{padding:0 6px 3px}
+.ap-cq .cq-card{height:28px;padding:0 6px;font-size:12px}
+.ap-cq .cq-subhead{padding:4px 6px 1px}
+.ap-cq .cq-card.is-recommended::after{inset:2px 1px}
+.ap-cq .cq-card:hover{background:#fff;border-radius:6px}
+.ap-pager{flex:none;display:flex;align-items:center;justify-content:center;gap:12px;margin-top:auto;padding-top:8px;font-size:12px;color:var(--ap-ink3);font-variant-numeric:tabular-nums}
+.assistant-page .ap-pager button{width:28px;height:24px;border-radius:8px;font-size:16px;line-height:1;color:var(--ap-ink2)}
+.assistant-page .ap-pager button:hover:not(:disabled){background:#fff}
+.ap-pager button:disabled{opacity:.3;cursor:default}
+/* 导航：时间尺 */
+.ap-scale{position:relative;flex:none;display:flex;flex-direction:column;gap:2px;margin-top:6px}
+.ap-scale::before{content:"";position:absolute;left:11px;top:14px;bottom:14px;width:1px;background:#d9d6e2}
+.assistant-page .ap-tk{position:relative;display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:4px 6px 4px 4px;border-radius:10px;text-align:left}
+.assistant-page .ap-tk:hover{background:#fff}
+.assistant-page .ap-tk.on{background:#fff;box-shadow:0 0 0 1px var(--ap-line),0 8px 20px -14px rgba(40,30,70,.35)}
+.ap-tk-d{position:relative;flex:none;width:15px;height:15px;display:grid;place-items:center;background:var(--ap-bg);border-radius:50%}
+.ap-tk.on .ap-tk-d,.ap-tk:hover .ap-tk-d{background:#fff}
+.ap-tk-d i{width:7px;height:7px;border-radius:50%;background:#bdb8c9}
+.ap-tk.run .ap-tk-d i{width:9px;height:9px;background:var(--ap-acc)}
+.ap-tk.run .ap-tk-d::after{content:"";position:absolute;inset:0;border-radius:50%;border:1.5px solid var(--ap-acc);opacity:.45}
+.ap-tk.done .ap-tk-d i{background:#3a6fd8}
+.ap-tk.idle .ap-tk-d i{width:7px;height:7px;background:#fff;border:1.5px solid #bdb8c9}
+.ap-tk.front .ap-tk-d i{width:15px;height:15px;background:var(--ap-acc);border-radius:5px;border:0}
+.ap-tk-d .ap-rd{position:absolute;right:-4px;top:-4px;margin:0;box-shadow:0 0 0 2px var(--ap-bg)}
+.ap-tk-lb{display:flex;flex-direction:column;min-width:0;font-size:12.5px;color:var(--ap-ink2);line-height:1.35}
+.ap-tk-lb b{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ap-tk.front .ap-tk-lb b{font-weight:700;color:var(--ap-ink);font-size:13px}
+.ap-tk-lb small{font-size:11px;color:var(--ap-ink3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 今日 */
+.ap-today-sec{flex:none;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--ap-line)}
+.ap-today-sec:last-child{border-bottom:0}
+.ap-plan-text{margin:0 0 6px;font-size:12.5px;line-height:1.65;color:var(--ap-ink2);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.ap-plan-item{display:flex;align-items:center;gap:7px;height:26px;font-size:12.5px;color:var(--ap-ink);cursor:pointer}
+.ap-plan-item input{accent-color:#5b3a8c;margin:0}
+.ap-plan-item time{flex:none;color:var(--ap-ink3);font-size:11.5px;font-variant-numeric:tabular-nums}
+.ap-plan-item span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ap-plan-item.done span{color:var(--ap-ink3);text-decoration:line-through}
+.ap-memo{display:flex;align-items:center;gap:7px;height:28px;font-size:12.5px}
+.ap-memo span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ap-memo em{font-style:normal;color:var(--ap-ink3);margin-right:5px;font-size:11.5px}
+.ap-memo time{flex:none;color:var(--ap-ink3);font-size:11px}
+.assistant-page .ap-memo-ck{flex:none;width:15px;height:15px;border-radius:5px;box-shadow:inset 0 0 0 1.5px #c9c4d6}
+.assistant-page .ap-memo-ck:hover{box-shadow:inset 0 0 0 1.5px var(--ap-acc);background:var(--ap-acc-soft)}
+.ap-more{margin:4px 0 0;font-size:11.5px;color:var(--ap-ink3)}
+.ap-timers{display:flex;flex-direction:column;gap:2px}
+.assistant-page .ap-switch{display:flex;align-items:center;justify-content:space-between;height:30px;padding:0 4px;border-radius:8px;font-size:12.5px;color:var(--ap-ink)}
+.assistant-page .ap-switch:hover{background:#fff}
+.ap-switch i{width:28px;height:16px;border-radius:999px;background:#d8d4e2;position:relative;transition:background .15s}
+.ap-switch i::after{content:"";position:absolute;left:2px;top:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:left .15s}
+.ap-switch[aria-pressed="true"] i{background:var(--ap-acc)}
+.ap-switch[aria-pressed="true"] i::after{left:14px}
+/* 定时任务回合（每日秘书、交接记录）：平时在前台会话里收起，「今日 → 看定时回合」打开后中间只看它们。 */
+body:not(.assistant-auto-view) .turn-card[data-auto-task]{display:none}
+body.assistant-auto-view #msg-overlay>.turn-card:not([data-auto-task]){display:none}
+/* 重启后一键续跑提示条（assistant-resume-card.js）：顶栏下方居中，哪个页面都看得到。 */
+.ap-resume-bar{position:fixed;top:52px;left:50%;transform:translateX(-50%);z-index:1200;width:min(720px,calc(100vw - 160px));-webkit-app-region:no-drag;font:13px/1.6 "Microsoft YaHei UI","Microsoft YaHei","Segoe UI",sans-serif;color:#221d2e}
+.ap-resume{display:flex;align-items:center;gap:14px;padding:10px 12px 10px 16px;background:#fff;border:1px solid #e8e6ef;border-left:3px solid #5b3a8c;border-radius:12px;box-shadow:0 12px 32px -18px rgba(40,30,70,.35)}
+.ap-resume-body{flex:1;min-width:0}
+.ap-resume-body p{margin:0}
+.ap-resume-fail{color:#c0392b}
+.ap-resume-open{padding:0;border:0;background:none;color:#5b3a8c;font:inherit;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.ap-resume-acts{display:flex;gap:8px;flex:none}
+.ap-resume-acts button{height:30px;padding:0 14px;border:1px solid #e8e6ef;border-radius:8px;background:#fff;color:#575166;font:inherit;cursor:pointer;white-space:nowrap}
+.ap-resume-acts button.primary{background:#5b3a8c;border-color:#5b3a8c;color:#fff}
+.ap-resume-acts button:disabled{opacity:.6;cursor:default}
+.ap-resume-acts .ap-resume-x{width:30px;padding:0;font-size:16px}
+/* 自动续跑卡：一行一个会话，标签区分已续 / 需核对 / 未续 */
+.ap-auto{align-items:flex-start}
+.ap-auto .ap-resume-text{margin-bottom:4px}
+.ap-auto-row{display:flex;align-items:baseline;gap:6px;min-width:0}
+.ap-auto-tag{flex:none;padding:0 6px;border-radius:4px;font-size:12px;line-height:18px;background:#eef6ee;color:#2e7d32}
+.ap-auto-row[data-action="uncertain"] .ap-auto-tag{background:#fff4e0;color:#b26a00}
+.ap-auto-row[data-action="skipped"] .ap-auto-tag,.ap-auto-row[data-action="failed"] .ap-auto-tag{background:#f1f0f4;color:#575166}
+.ap-auto-row[data-action="retrying"] .ap-auto-tag{background:#e8f0fe;color:#3478f6}
+.ap-auto-why{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#575166}
+.ap-auto-time{flex:none;margin-left:auto;color:#8a8597;font-size:12px}
+.ap-auto-more{color:#8a8597;font-size:12px}
+.ap-auto-go{flex:none;height:22px;padding:0 10px;border:1px solid #3478f6;border-radius:6px;background:#fff;color:#3478f6;font:inherit;font-size:12px;cursor:pointer}
+.ap-auto-go:disabled{opacity:.5;cursor:default}
+/* 拍板项「就这样 / 恢复」（2026-11-14 T-20261114-010）：悬停才出按钮，平时只有已收起的灰字。 */
+.ap-park{display:none;flex:none;font-size:11px;line-height:20px;padding:0 7px;border-radius:7px;background:#fff;color:var(--ap-ink2);box-shadow:0 0 0 1px var(--ap-line);font-weight:400;cursor:pointer}
+.ap-park:hover{color:var(--ap-acc);box-shadow:0 0 0 1px var(--ap-acc)}
+.assistant-page .ap-row:hover .ap-park{display:inline-block}
+.assistant-page .ap-row:hover .ap-row-title + .ap-tag{display:none}
+.ap-parked{flex:none;font-style:normal;font-size:10.5px;color:var(--ap-ink3)}
+.assistant-page .ap-row:hover .ap-parked{display:none}
+
+/* 负责人简述条（2026-11-22）：两行简述 + 打开会话，样式跟重启续跑提示条一致 */
+.ap-brief-bar{position:fixed;top:52px;left:50%;transform:translateX(-50%);z-index:1190;width:min(720px,calc(100vw - 160px));display:flex;flex-direction:column;gap:6px;-webkit-app-region:no-drag;font:13px/1.6 "Microsoft YaHei UI","Microsoft YaHei","Segoe UI",sans-serif;color:#221d2e}
+.ap-brief{display:flex;align-items:center;gap:14px;padding:8px 10px 8px 14px;background:#fff;border:1px solid #e8e6ef;border-left:3px solid #5b3a8c;border-radius:12px;box-shadow:0 12px 32px -18px rgba(40,30,70,.35)}
+.ap-brief[data-kind="lead-decide"]{border-left-color:#d4881c}
+.ap-brief-body{flex:1;min-width:0}
+.ap-brief-body p{margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap-brief-head{display:flex;align-items:center;gap:8px;font-size:12px;color:#8a8496}
+.ap-brief-tag{flex:none;padding:0 6px;border-radius:4px;background:#efeaf7;color:#5b3a8c;font-weight:600}
+.ap-brief[data-kind="lead-decide"] .ap-brief-tag{background:#fdf1e0;color:#a5650c}
+.ap-brief-title{min-width:0;overflow:hidden;text-overflow:ellipsis;color:#575166}
+.ap-brief-time{flex:none;margin-left:auto}
+.ap-brief-line{font-weight:600}
+.ap-brief-line.sub{font-weight:400;color:#575166}
+.ap-brief-acts{display:flex;gap:6px;flex:none}
+.ap-brief-acts button,.ap-brief-foot button{height:30px;padding:0 14px;border:1px solid #e8e6ef;border-radius:8px;background:#fff;color:#575166;font:inherit;cursor:pointer;white-space:nowrap}
+.ap-brief-acts button.primary{background:#5b3a8c;border-color:#5b3a8c;color:#fff}
+.ap-brief-acts .ap-brief-x{width:30px;padding:0;font-size:16px}
+.ap-brief-foot{display:flex;justify-content:flex-end;gap:6px}
+.ap-brief-foot button{height:24px;padding:0 10px;font-size:12px;background:rgba(255,255,255,.92)}

@@ -1,0 +1,40 @@
+.hub-tip {
+  position: fixed; z-index: 10050; max-width: min(340px, calc(100vw - 16px)); box-sizing: border-box;
+  padding: 6px 10px; border-radius: 8px;
+  background: var(--surface-overlay, var(--surface-raised, #fff)); color: var(--fg-default);
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 10px 28px rgba(22, 34, 58, .13), 0 2px 6px rgba(22, 34, 58, .06);
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif; font-size: 12px; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere; pointer-events: none;
+  opacity: 0; transform: translateY(2px); transition: opacity .12s ease, transform .12s ease;
+}
+/* 纯文字卡不接鼠标：盖在相邻菜单项、按钮上时点击照样落到下面（11-01 账号下拉被卡片挡住）；带按钮的卡才可移入点按。 */
+.hub-tip:has(.hub-tip-actions) { pointer-events: auto; }
+.hub-tip.is-on { opacity: 1; transform: none; }
+.hub-tip[hidden] { display: none !important; }
+:root[data-theme='dark'] .hub-tip { box-shadow: 0 12px 32px rgba(0, 0, 0, .45), 0 0 0 1px rgba(255, 255, 255, .04); }
+.hub-tip.is-rich { padding: 11px 13px; border-radius: 10px; width: max-content; min-width: 200px; white-space: normal; }
+.hub-tip-title { font-size: 12.5px; font-weight: 600; color: var(--fg-strong, var(--fg-default)); margin-bottom: 6px; }
+.hub-tip-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 10px; margin: 2px 0; }
+.hub-tip-kv > span { color: var(--fg-muted); white-space: nowrap; }
+.hub-tip-line { color: var(--fg-default); margin: 2px 0; }
+.hub-tip-line + .hub-tip-kv, .hub-tip-kv + .hub-tip-line { margin-top: 6px; }
+/* 指向箭头：一个旋转 45° 的小方块，颜色和边框与卡片一致。 */
+.hub-tip::before {
+  content: ''; position: absolute; width: 9px; height: 9px; box-sizing: border-box;
+  background: inherit; border: 1px solid var(--border-subtle); transform: rotate(45deg);
+}
+.hub-tip[data-side='bottom']::before { top: -5px; left: calc(var(--hub-tip-caret, 20px) - 4.5px); border-right: 0; border-bottom: 0; }
+.hub-tip[data-side='top']::before { bottom: -5px; left: calc(var(--hub-tip-caret, 20px) - 4.5px); border-left: 0; border-top: 0; }
+.hub-tip[data-side='right']::before { left: -5px; top: calc(var(--hub-tip-caret, 16px) - 4.5px); border-right: 0; border-top: 0; }
+.hub-tip[data-side='left']::before { right: -5px; top: calc(var(--hub-tip-caret, 16px) - 4.5px); border-left: 0; border-bottom: 0; }
+/* 悬停卡底部操作条（账号卡片的「测到 Claude」） */
+.hub-tip-actions { display: flex; align-items: center; gap: 10px; margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--border-subtle); font-size: 11px; color: var(--fg-muted); }
+.hub-tip-actions > span { flex: 1; min-width: 0; }
+.hub-tip-button { flex: none; height: 22px; padding: 0 9px; border-radius: 6px; font: inherit; font-size: 11.5px; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--brand) 35%, transparent); background: color-mix(in srgb, var(--brand) 8%, transparent); color: var(--brand); }
+.hub-tip-button:hover { background: color-mix(in srgb, var(--brand) 14%, transparent); }
+.hub-tip-button:disabled { opacity: .6; cursor: wait; }
+.hub-tip-button[data-level='good'] { color: var(--status-success); border-color: color-mix(in srgb, var(--status-success) 35%, transparent); background: transparent; }
+.hub-tip-button[data-level='even'] { color: var(--status-warning); border-color: color-mix(in srgb, var(--status-warning) 35%, transparent); background: transparent; }
+.hub-tip-button[data-level='bad'] { color: var(--status-danger); border-color: color-mix(in srgb, var(--status-danger) 35%, transparent); background: transparent; }

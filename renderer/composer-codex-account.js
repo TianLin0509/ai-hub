@@ -1,0 +1,225 @@
+'use strict';
+const accountRisk = require('./account-risk-state');
+const { autoSwitchItem } = require('./composer-account-auto');
+const accountQuota = require('./composer-account-quota');
+const { paintAccountMenu } = require('./composer-account-menu');
+
+function eligible(session) {
+  return !!session && /^codex(?:-resume)?$/.test(session.kind || '')
+    && session.agentRuntime === 'pty' && !session.runtimeBackend && !!session.codexProfile
+    && session.codexProfile !== 'deepseek-api';
+}
+
+// Account ownership only comes from session-updated. Selecting a row never
+// changes the chip optimistically, nor does this component touch the draft.
+function mountCodexAccountChip({ document: doc, tuningControls, sessionId, getSession, ipcRenderer, beforeSwitch }) {
+  const chip = doc.createElement('button');
+  chip.type = 'button';
+  chip.className = 'composer-chip composer-codex-account';
+  chip.dataset.sessionId = sessionId;
+  chip.setAttribute('aria-haspopup', 'menu');
+  chip.setAttribute('aria-expanded', 'false');
+  tuningControls.append(chip);
+  let menu = null, options = null, pendingProfile = null, inFlight = false;
+  let disposed = false, request = 0, revision = 0, signature = '', feedback = null;
+
+  function close() {
+    request++;
+    menu?.remove();
+    menu = null;
+    chip.setAttribute('aria-expanded', 'false');
+  }
+
+  function position() {
+    if (!menu) return;
+    const rect = chip.getBoundingClientRect();
+    const width = doc.defaultView?.innerWidth || 1024;
+    const height = doc.defaultView?.innerHeight || 768;
+    menu.style.left = Math.max(8, Math.min(rect.left, width - menu.getBoundingClientRect().width - 8)) + 'px';
+    menu.style.top = Math.max(8, Math.min(rect.top - menu.getBoundingClientRect().height - 6, height - menu.getBoundingClientRect().height - 8)) + 'px';
+  }
+
+  function paintMenu() {
+    if (!menu) return;
+    const session = getSession();
+    const status = session?.codexSwitchStatus;
+    const pending = isQueued(status) ? status.targetProfile : pendingProfile;
+    const noteText = feedback?.message || (!options?.canSwitch && options?.reason) || status?.message || options?.reason
+      || (accountRisk.riskShown('codex', session?.codexProfile) ? '当前账号风控观察中：尽量少用，新任务建议用其他账号新建会话。' : '');
+    paintAccountMenu({ document: doc, menu, kind: 'codex', state: {
+      accounts: options?.accounts || null, currentId: session?.codexProfile, pendingId: pending,
+      canSwitch: !!options?.canSwitch, disabledAll: inFlight || isSwitching(status),
+      note: { text: noteText, state: feedback?.state || (isFailure(status) ? 'error' : noteText ? 'pending' : 'hint') },
+      autoItem: options?.canSwitch && options.accounts?.length > 1
+        ? autoSwitchItem({ document: doc, enabled: options.autoSwitch === true, disabled: inFlight, onToggle: () => void toggleAuto() }) : null,
+      onSelect: id => void select(id),
+      titles: (account, { current }) => [current && pending ? '当前账号，点击取消待切换' : '',
+        !options.canSwitch ? options.reason || '此会话暂不能切换账号' : account.reason || '',
+        accountRisk.optionNote('codex', account.id) || ''].filter(Boolean).join('\n'),
+    } });
+    position();
+  }
+
+  function update() {
+    if (disposed) return;
+    const session = getSession();
+    const next = JSON.stringify([session?.codexProfile, session?.codexProfileLabel,
+      session?.codexAuthGeneration, session?.codexSwitchStatus]);
+    if (signature !== next) {
+      signature = next; revision++; feedback = null;
+      pendingProfile = isQueued(session?.codexSwitchStatus)
+        ? session.codexSwitchStatus.targetProfile : null;
+    }
+    chip.hidden = !eligible(session);
+    if (chip.hidden) { close(); return; }
+    const label = session.codexProfileLabel || session.codexProfile;
+    const risky = !!accountRisk.riskShown('codex', session.codexProfile);
+    const html = accountQuota.chipHtml('codex', session.codexProfile, label, { risk: risky, auto: session.codexAutoSwitch === true });
+    if (chip.dataset.html !== html) { chip.innerHTML = html; chip.dataset.html = html; }
+    chip.dataset.accountRisk = accountRisk.riskShown('codex', session.codexProfile) ? '1' : '';
+    chip.setAttribute('aria-label', `Codex 账号：${label}`);
+    chip.dataset.profileId = session.codexProfile;
+    chip.dataset.status = session.codexSwitchStatus?.status || '';
+    chip.title = accountQuota.chipTitle('codex', session.codexProfile, label,
+      accountRisk.describe('codex', session.codexProfile) || accountRisk.shareNote('codex', session.codexProfile) || feedback?.message || session.codexSwitchStatus?.message || '');
+    paintMenu();
+  }
+
+  async function open() {
+    if (disposed || !eligible(getSession())) return;
+    if (menu) { close(); return; }
+    const session = getSession(), ticket = ++request;
+    menu = doc.createElement('div');
+    menu.className = 'model-picker-menu claude-account-menu codex-account-menu cam-menu';
+    menu.dataset.sessionId = sessionId;
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', '选择 Codex 账号');
+    doc.body.append(menu);
+    chip.setAttribute('aria-expanded', 'true');
+    options = null; feedback = null;
+    paintMenu();
+    try {
+      const result = await ipcRenderer.invoke('session:codex-account-options', { sessionId });
+      if (disposed || ticket !== request || getSession() !== session) return;
+      if (!result?.ok) throw new Error(result?.reason || result?.message || '无法读取账号列表');
+      options = result;
+      pendingProfile = result.pendingProfile || null;
+      paintMenu();
+    } catch (error) {
+      if (disposed || ticket !== request || getSession() !== session) return;
+      feedback = { state: 'error', message: error.message || String(error) };
+      paintMenu();
+    }
+  }
+
+  async function toggleAuto() {
+    if (disposed || inFlight || !options) return;
+    const enabled = options.autoSwitch !== true, shown = options;
+    inFlight = true;
+    feedback = null;
+    paintMenu();
+    try {
+      const result = await ipcRenderer.invoke('session:set-codex-auto-switch', { sessionId, enabled });
+      if (!result?.ok) throw new Error(result?.message || '自动换号设置失败');
+      shown.autoSwitch = result.enabled === true;
+      feedback = { state: 'success', message: result.enabled ? '已开启：这个会话额度用完时会自动换号' : '已关闭自动换号' };
+    } catch (error) {
+      feedback = { state: 'error', message: error.message || String(error) };
+    } finally {
+      inFlight = false;
+      if (!disposed) paintMenu();
+    }
+  }
+
+  async function select(profileId) {
+    const account = options?.accounts?.find(row => row.id === profileId);
+    const session = getSession();
+    if (disposed || inFlight || !account || !options.canSwitch || !eligible(session)
+      || isSwitching(session.codexSwitchStatus)
+      || (profileId !== session.codexProfile && account.available !== true)) return;
+    const startedRevision = revision;
+    inFlight = true;
+    feedback = { state: 'pending', message: '正在申请切换账号…' };
+    paintMenu();
+    try {
+      await beforeSwitch?.();
+      if (disposed || getSession() !== session || startedRevision !== revision) return;
+      const result = await ipcRenderer.invoke('session:set-codex-account', { sessionId, profileId });
+      if (disposed || getSession() !== session || startedRevision !== revision) return;
+      if (!result?.ok) throw new Error(result?.message || result?.reason || '切换账号失败');
+      pendingProfile = result.status === 'queued' ? profileId : null;
+      feedback = { state: result.status === 'queued' ? 'pending' : 'success',
+        message: result.message || ({ queued: '已排队，本轮结束后切换账号', switched: '账号已切换',
+          unchanged: '当前已使用此账号', cancelled: '已取消待切换账号' }[result.status] || '请求已处理') };
+    } catch (error) {
+      if (disposed || getSession() !== session || startedRevision !== revision) return;
+      feedback = { state: 'error', message: error.message || String(error) };
+    } finally {
+      inFlight = false;
+      if (!disposed && getSession() === session) update();
+    }
+  }
+
+  const outside = event => { if (menu && !menu.contains(event.target) && !chip.contains(event.target)) close(); };
+  const keydown = event => { if (menu && event.key === 'Escape') { close(); chip.focus(); } };
+  chip.addEventListener('click', event => { event.stopPropagation(); void open(); });
+  doc.addEventListener('pointerdown', outside, true);
+  doc.addEventListener('keydown', keydown);
+  const unsubscribe = accountQuota.subscribe(() => update());
+  update();
+  return { chip, update, open, select, dispose() {
+    disposed = true; close(); unsubscribe();
+    doc.removeEventListener('pointerdown', outside, true);
+    doc.removeEventListener('keydown', keydown);
+  } };
+}
+
+function isQueued(status) { return ['queued', 'manual-queued'].includes(status?.status); }
+function isFailure(status) { return ['attention', 'manual-failed'].includes(status?.status); }
+
+function isSwitching(status) {
+  return status?.status === 'manual-switching' || status?.status === 'switching';
+}
+
+// A resumed writer must launch with its target account. The chip keeps the last
+// confirmed ownership until the new writer's native session-start is verified.
+function applyCodexAccountMeta(local, patch) {
+  const status = patch.codexSwitchStatus !== undefined ? patch.codexSwitchStatus : local.codexSwitchStatus;
+  const switching = isSwitching(status) || isFailure(status);
+  let changed = false;
+  for (const key of ['codexProfile', 'codexProfileLabel', 'codexAuthGeneration',
+    'codexAutoSwitch', 'codexAccountPinned', 'codexSwitchStatus']) {
+    if (!Object.hasOwn(patch, key)) continue;
+    if (switching && ['codexProfile', 'codexProfileLabel', 'codexAuthGeneration'].includes(key)) continue;
+    if (local[key] !== patch[key]) { local[key] = patch[key]; changed = true; }
+  }
+  return changed;
+}
+
+function preserveCodexAccountRestart(local, patch) {
+  if (!local || !/^codex(?:-resume)?$/.test(local.kind || '')
+    || patch?.suspendReason !== 'account-switch') return false;
+  applyCodexAccountMeta(local, patch);
+  // Keep DOM, draft controller, focus, preview, card and split-pane membership.
+  const failed = patch.status === 'dormant' && isFailure(patch.codexSwitchStatus);
+  local._codexAccountRestart = !failed;
+  if (failed) local.status = 'dormant';
+  local.suspendReason = 'account-switch';
+  local._agentWorking = false;
+  local.gcWorking = false;
+  return true;
+}
+
+function resumeCodexAccountRestart(local, patch) {
+  if (!local?._codexAccountRestart) return false;
+  const account = Object.fromEntries(['codexProfile', 'codexProfileLabel', 'codexAuthGeneration']
+    .map(key => [key, local[key]]));
+  const ux = Object.fromEntries(['pinned', 'bottomed', 'unreadCount', 'lastOutputPreview', 'title']
+    .map(key => [key, local[key]]));
+  Object.assign(local, patch, ux, account, { suspendedAt: null, suspendReason: null, _codexAccountRestart: false });
+  applyCodexAccountMeta(local, patch);
+  return true;
+}
+
+module.exports = { eligible, mountCodexAccountChip, isSwitching, applyCodexAccountMeta,
+  preserveCodexAccountRestart, resumeCodexAccountRestart };

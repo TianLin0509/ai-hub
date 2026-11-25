@@ -1,0 +1,83 @@
+/* 负责人组队（2026-11-01，renderer/team-ui.js）：侧栏标签与批准弹窗。沿用 Hub 浅色界面与 sl-orch-tag 的橙色。 */
+.team-pending-badge { margin-right: 4px; padding: 0 6px; border-radius: 999px; font-size: 10px; line-height: 15px; color: #fff; background: #e08a00; border: 0; cursor: pointer; vertical-align: 1px; }
+.team-pending-badge:hover { background: #c77600; }
+.team-collapse-toggle { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 20px; padding: 0; margin: 0 3px 0 0; border: 0; border-radius: 4px; color: #64748b; background: transparent; font: inherit; cursor: pointer; vertical-align: -1px; }
+.team-collapse-toggle:hover { color: #3478f6; background: #e8effb; }
+.team-collapse-toggle:focus-visible { outline: 2px solid #3478f6; outline-offset: 1px; }
+.team-member-tag { display: inline-block; margin-right: 4px; padding: 0 4px; border-radius: 4px; font-size: 10px; line-height: 14px; color: #3478f6; border: 1px solid #c9dafc; background: #f3f7ff; vertical-align: 1px; }
+.team-member-tag.dismissed { color: #999; border-color: #ddd; background: #f5f5f5; text-decoration: line-through; }
+/* 2026-11-04 d1 · 批准抽屉版式对齐公司版（726f8c67）：右侧抽屉、顶部计划摘要、成员卡、备注与按钮固定在底部。
+   */
+.team-modal-backdrop { --team-r-drawer: var(--radius-xl, 16px); --team-r-card: var(--radius-lg, 10px); --team-r-field: var(--radius-sm, 6px);
+  --team-soft: var(--surface-sunken, #f1f4f7); --team-line: var(--border-subtle, #e5e9ee); --team-ring: 0 0 0 3px rgba(var(--rgb-brand, 48, 101, 189), .16);
+  position: fixed; inset: 0; z-index: 9000; background: var(--hub-dialog-scrim, rgba(20, 24, 31, 0.32)); font-family: var(--font-sans, "Microsoft YaHei", sans-serif); color: var(--fg-strong, #1f2329); -webkit-app-region: no-drag; }
+.team-modal-backdrop * { box-sizing: border-box; }
+.team-modal { position: absolute; right: 12px; top: 12px; bottom: 12px; width: 600px; max-width: calc(100% - 24px); display: flex; flex-direction: column; overflow: hidden;
+  background: var(--surface-raised, #fff); border-radius: var(--team-r-drawer); box-shadow: var(--shadow-lg, 0 12px 40px rgba(0, 0, 0, .18)); animation: team-drawer-in .22s ease-out; }
+.team-modal [hidden] { display: none !important; }
+.team-modal-head { flex: none; display: flex; align-items: flex-start; gap: 12px; padding: 22px 24px 6px; }
+.team-modal-head > div { flex: 1; min-width: 0; }
+.team-modal h3 { margin: 0; font-size: 18px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.team-goal { margin: 4px 0 0; color: var(--fg-muted, #4e5969); font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.team-close { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: var(--radius-pill, 999px); background: transparent; color: var(--fg-muted, #4e5969); font-size: 22px; line-height: 1; font-family: inherit; cursor: pointer; }
+.team-close:hover { background: var(--surface-hover, #edf1f6); color: var(--fg-strong, #1f2329); }
+.team-plan-summary { flex: none; margin: 10px 24px 0; padding: 10px 14px; border: 1px solid var(--team-line); border-radius: var(--team-r-card); background: var(--team-soft); font-size: 12px; }
+.team-plan-summary > div { display: flex; align-items: center; gap: 14px; color: var(--fg-muted, #4e5969); }
+.team-plan-summary b { color: var(--fg-strong, #1f2329); font-weight: 600; }
+.team-plan-summary p { margin: 4px 0 0; color: var(--fg-faint, #86909c); line-height: 1.5; overflow-wrap: anywhere; }
+.team-modal-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 24px 16px; scrollbar-gutter: stable; }
+.team-plan { display: flex; flex-direction: column; gap: 10px; font-size: 12.5px; }
+.team-member { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: var(--team-r-card); background: var(--team-soft); }
+.team-member-head { display: flex; align-items: center; gap: 10px; }
+.team-member-icon { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: var(--team-r-field); background: var(--brand, #3478f6); color: var(--brand-ink, #fff); font-size: 13px; font-weight: 600; }
+.team-member[data-kind="claude"] .team-member-icon { background: #c96442; color: #fff; }
+.team-member[data-kind="codex"] .team-member-icon { background: var(--fg-strong, #222a36); color: var(--surface-raised, #fff); }
+.team-member-heading { flex: 1; min-width: 0; }
+.team-member-heading b { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.team-col-no { color: var(--fg-faint, #86909c); font-size: 12px; font-variant-numeric: tabular-nums; }
+.team-sub { color: var(--fg-faint, #86909c); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.team-task { color: var(--fg-default, #33333a); font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.team-task strong { color: var(--fg-strong, #1f2329); font-weight: 600; }
+.team-workdir { color: var(--fg-faint, #86909c); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.team-member-fields { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.team-member-fields.two { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+.team-member-fields label { min-width: 0; display: flex; flex-direction: column; gap: 6px; color: var(--fg-muted, #4e5969); font-size: 12.5px; }
+.team-plan select { width: 100%; min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--team-line); border-radius: var(--team-r-field); background: var(--surface-raised, #fff); color: var(--fg-strong, #1f2329); font-size: 12.5px; font-family: inherit; text-overflow: ellipsis; }
+.team-plan select:focus-visible, .team-note textarea:focus-visible { outline: 0; border-color: var(--brand, #3478f6); box-shadow: var(--team-ring); }
+.team-plan select option:disabled { color: var(--fg-faint, #86909c); }
+.team-modal-foot { flex: none; border-top: 1px solid var(--team-line); background: var(--surface-raised, #fff); }
+.team-note { display: block; margin: 12px 24px 0; color: var(--fg-muted, #4e5969); font-size: 12.5px; }
+.team-note textarea { display: block; width: 100%; min-height: 64px; margin-top: 6px; padding: 8px 12px; resize: vertical; border: 1px solid transparent; border-radius: var(--team-r-field); background: var(--team-soft); color: var(--fg-strong, #1f2329); font-size: 13px; line-height: 1.5; font-family: inherit; }
+.team-modal-foot .team-error { margin: 8px 24px 0; }
+.team-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 12px 24px 18px; }
+.team-actions button { height: 36px; padding: 0 18px; border: 0; border-radius: var(--radius-pill, 999px); background: var(--team-soft); color: var(--fg-default, #33333a); font-size: 13px; font-family: inherit; cursor: pointer; }
+.team-actions button:hover { background: var(--surface-hover, #edf1f6); }
+.team-actions button.primary { background: var(--cta-bg, var(--brand, #3478f6)); color: var(--cta-fg, #fff); font-weight: 600; box-shadow: var(--shadow-sm, none); }
+.team-actions button.primary:hover { background: var(--cta-bg-hover, var(--brand-hover, #2d68d8)); }
+.team-actions button:disabled { opacity: .5; cursor: default; box-shadow: none; }
+.team-actions button:focus-visible, .team-close:focus-visible { outline: 2px solid var(--brand, #3478f6); outline-offset: 2px; }
+.team-error { margin-top: 8px; color: var(--status-danger, #d4380d); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+@keyframes team-drawer-in { from { transform: translateX(28px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .team-modal { animation: none; } }
+.sl-title > .sl-orch-tag:first-child { margin-left: 0; margin-right: 4px; }
+/* 排队等干活名额的人数（2026-11-09）：用中性灰，和「负责人」「待批准」的橙色区分。 */
+.sl-orch-tag.team-queued-tag { color: var(--text-secondary, #5f6b7a); border-color: var(--border, #d5dbe3); background: var(--bg-subtle, #f4f6f9); }
+/* 离队成员折叠行（2026-11-15）：沉在项目底部，一行小字，默认收起 */
+.team-left-fold { padding: 1px 0 1px 8px; }
+.team-left-toggle { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border: 0; border-radius: 4px; background: transparent; color: #8a94a3; font: inherit; font-size: 12px; cursor: pointer; }
+.team-left-toggle:hover { color: #3478f6; background: #e8effb; }
+.team-left-toggle:focus-visible { outline: 2px solid #3478f6; outline-offset: 1px; }
+.team-left-caret { width: 10px; display: inline-block; }
+/* 右键「登记为负责人…」小弹窗 */
+.team-register-backdrop { position: fixed; inset: 0; z-index: 3000; display: flex; align-items: center; justify-content: center; background: rgba(15, 23, 42, .28); }
+.team-register { width: 440px; max-width: calc(100% - 32px); display: grid; gap: 12px; padding: 22px 24px 18px; border-radius: 12px; background: var(--surface-canvas, #fff); color: var(--fg-strong, #1f2937); box-shadow: 0 12px 40px rgba(15, 23, 42, .18); font-family: inherit; }
+.team-register h3 { margin: 0; font-size: 16px; }
+.team-register-sub { margin: 0; color: var(--fg-muted, #64748b); font-size: 12px; line-height: 1.6; }
+.team-register label { display: grid; gap: 6px; font-size: 12px; color: var(--fg-muted, #64748b); }
+.team-register :is(input, textarea) { padding: 8px 10px; border: 1px solid var(--border-mid, #cbd5e1); border-radius: 6px; background: var(--surface-card, #fff); color: var(--fg-strong, #1f2937); font: 13px/1.5 inherit; font-family: inherit; resize: vertical; }
+.team-register :is(input, textarea):focus-visible { outline: 2px solid #3478f6; outline-offset: 1px; }
+.team-register-error { margin: 0; color: #c2410c; font-size: 12px; }
+.team-register-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.team-register-actions button { height: 32px; padding: 0 16px; border: 1px solid var(--border-mid, #cbd5e1); border-radius: 6px; background: var(--surface-card, #fff); color: var(--fg-strong, #1f2937); font: inherit; cursor: pointer; }
+.team-register-actions button.primary { border-color: #3478f6; background: #3478f6; color: #fff; }
+.team-register-actions button:disabled { opacity: .6; cursor: default; }

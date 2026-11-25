@@ -1,0 +1,105 @@
+/* 「问一下」抽屉 · 2026-11-10 外观向 AI HUB-H（styles/ask-aside.css）与卡片视图看齐。
+   只用个人版通用令牌（--surface-* --border-* --fg-* --brand* --radius-* --shadow-* --status-*），换主题跟着变；不新增全局令牌。 */
+
+/* 顶栏入口：图标 + 文字，抽屉开着时高亮 */
+.btw-ask-open { width: auto !important; padding: 0 10px 0 8px !important; display: inline-flex !important; align-items: center; gap: 5px; }
+.btw-ask-open svg { width: 15px; height: 15px; flex: none; color: var(--brand, #3065bd); fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.btw-ask-open.on { background: var(--brand-tint, #e7eefb) !important; color: var(--brand, #3065bd) !important; }
+.btw-ask-open:disabled { opacity: .45; cursor: not-allowed; }
+.btw-ask-open:disabled svg { color: currentColor; }
+
+/* 抽屉：浮在会话区右侧的圆角面板，不加遮罩（边问边看会话）；位置由脚本按会话区写进 --btw-top/right/bottom */
+.btw-ask-drawer {
+  position: fixed; top: var(--btw-top, 52px); right: var(--btw-right, 10px); bottom: var(--btw-bottom, 44px); z-index: 700;
+  width: 440px; max-width: calc(100vw - 24px); box-sizing: border-box;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--surface-card, #fff); color: var(--fg-strong, #222a36);
+  border: 1px solid var(--border-subtle, #e5e9ee); border-radius: var(--radius-xl, 16px);
+  box-shadow: var(--shadow-lg, 0 20px 65px #34496825);
+  font-family: var(--card-content-font-family, "Segoe UI", "Microsoft YaHei UI", sans-serif); font-size: 14px;
+  animation: btw-ask-slide .2s ease-out;
+}
+.btw-ask-drawer[hidden], .btw-ask-drawer [hidden] { display: none !important; }
+.btw-ask-drawer * { box-sizing: border-box; }
+.btw-ask-drawer p, .btw-ask-drawer h3 { margin: 0; }
+.btw-ask-drawer button { font: inherit; cursor: pointer; color: inherit; }
+.btw-ask-drawer svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* 头部：图标 + 标题 + 会话名，右上角圆形关闭 */
+.btw-ask-head { display: flex; align-items: flex-start; gap: 12px; padding: 18px 14px 12px 20px; }
+.btw-ask-ic { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: var(--radius-md, 9px); background: var(--brand-tint, #e7eefb); color: var(--brand, #3065bd); }
+.btw-ask-ic svg { width: 18px; height: 18px; }
+.btw-ask-ttl { flex: 1; min-width: 0; }
+.btw-ask-ttl h3 { font-size: 16px; font-weight: 600; line-height: 1.3; }
+.btw-ask-ttl p { margin-top: 2px; font-size: 12px; color: var(--fg-faint, #778395); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btw-ask-drawer .btw-ask-icon-btn { width: 30px; height: 30px; flex: none; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--fg-muted, #637084); }
+.btw-ask-drawer .btw-ask-icon-btn:hover { background: var(--surface-sunken, #f1f4f7); color: var(--fg-strong, #222a36); }
+.btw-ask-icon-btn svg { width: 16px; height: 16px; }
+
+/* 问答区 */
+.btw-ask-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 20px 18px; }
+.btw-ask-intro { padding: 8px 0 4px; }
+.btw-ask-note { font-size: 13px; line-height: 1.7; color: var(--fg-muted, #637084); }
+.btw-ask-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.btw-ask-drawer .btw-ask-chip { height: 30px; padding: 0 12px; border: 1px solid var(--border-subtle, #e5e9ee); border-radius: var(--radius-pill, 999px); background: var(--surface-card, #fff); font-size: 13px; color: var(--fg-muted, #637084); white-space: nowrap; }
+.btw-ask-drawer .btw-ask-chip:hover { border-color: var(--brand-tint-border, #cbd9ef); background: var(--brand-tint, #e7eefb); color: var(--brand, #3065bd); }
+
+/* 一问一答：问题右侧浅蓝气泡（同卡片视图的用户消息），回答左侧白底细描边气泡（同卡片视图的回答），组间 20px */
+.btw-ask-qa + .btw-ask-qa { margin-top: 20px; }
+.btw-ask-q { display: flex; justify-content: flex-end; }
+.btw-ask-question { max-width: 86%; padding: 8px 14px; border-radius: 14px 14px 4px 14px; background: var(--brand-tint, #e7eefb); color: var(--fg-strong, #222a36); font-size: 14px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.btw-ask-answer { width: fit-content; max-width: 94%; margin-top: 10px; padding: 10px 14px; border: 1px solid var(--border-subtle, #e5e9ee); border-radius: 14px 14px 14px 4px; background: var(--surface-card, #fff); color: var(--fg-strong, #222a36); font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; user-select: text; }
+.btw-ask-answer.is-plain, .btw-ask-empty { white-space: pre-wrap; }
+.btw-ask-empty { color: var(--fg-muted, #637084); }
+.btw-ask-meta { margin-top: 6px; padding-left: 4px; font-size: 12px; line-height: 1.5; color: var(--fg-faint, #778395); font-variant-numeric: tabular-nums; }
+
+/* 回答的 markdown 排版（与卡片正文同一套节奏，按抽屉宽度收紧） */
+.btw-ask-md > :first-child { margin-top: 0; }
+.btw-ask-md > :last-child { margin-bottom: 0; }
+.btw-ask-md p { margin: 0 0 8px; }
+.btw-ask-md ul, .btw-ask-md ol { margin: 4px 0 8px; padding-left: 1.4em; }
+.btw-ask-md li { margin: 2px 0; }
+.btw-ask-md li > ul, .btw-ask-md li > ol { margin: 2px 0; }
+.btw-ask-md strong { font-weight: 650; }
+.btw-ask-md h1, .btw-ask-md h2, .btw-ask-md h3, .btw-ask-md h4 { margin: 10px 0 6px; font-size: 14px; font-weight: 650; }
+.btw-ask-md code { padding: 1px 5px; border-radius: 4px; background: var(--surface-sunken, #f1f4f7); font-family: var(--font-mono, "Cascadia Mono", Consolas, monospace); font-size: 12px; }
+.btw-ask-md pre { margin: 6px 0 8px; padding: 8px 10px; overflow: auto; border-radius: 8px; background: var(--surface-sunken, #f1f4f7); }
+.btw-ask-md pre code { padding: 0; background: none; }
+.btw-ask-md blockquote { margin: 6px 0; padding-left: 10px; border-left: 3px solid var(--border-mid, #d8dfe8); color: var(--fg-muted, #637084); }
+.btw-ask-md a { color: var(--link, #3065bd); }
+.btw-ask-md table { border-collapse: collapse; margin: 6px 0; font-size: 13px; }
+.btw-ask-md th, .btw-ask-md td { padding: 4px 8px; border: 1px solid var(--border-subtle, #e5e9ee); }
+
+/* 思考中 / 排队：同一气泡形状，固定宽度，右侧计时 */
+.btw-ask-wait { width: 92%; display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: var(--surface-raised, #fff); color: var(--fg-muted, #637084); font-size: 13px; }
+.btw-ask-wait .t { flex: 1; min-width: 0; line-height: 1.5; }
+.btw-ask-wait .t small { display: block; font-size: 12px; color: var(--fg-faint, #778395); }
+.btw-ask-wait time { color: var(--fg-strong, #222a36); font-weight: 600; font-variant-numeric: tabular-nums; }
+.btw-ask-wait:not(.is-thinking) { border-style: dashed; }
+.btw-ask-dots { display: inline-flex; gap: 4px; align-items: center; flex: none; }
+.btw-ask-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--brand, #3065bd); animation: btw-ask-breath 1.4s ease-in-out infinite; }
+.btw-ask-dots i:nth-child(2) { animation-delay: .18s; }
+.btw-ask-dots i:nth-child(3) { animation-delay: .36s; }
+
+/* 失败：同一气泡形状，琥珀浅底，无描边 */
+.btw-ask-error { width: 92%; margin-top: 10px; display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 14px 14px 14px 4px; background: var(--status-warning-tint, rgba(138, 90, 0, .12)); color: var(--fg-strong, #222a36); font-size: 13px; line-height: 1.6; }
+.btw-ask-error svg { width: 16px; height: 16px; flex: none; margin-top: 2px; color: var(--status-warning, #8a5a00); }
+.btw-ask-error .t { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* 输入区：灰底圆角框，聚焦时变白并出蓝色描边；提示与「提问」在框内底行 */
+.btw-ask-foot { margin: 0; padding: 12px 16px 16px; border-top: 1px solid var(--border-subtle, #e5e9ee); }
+.btw-ask-in { display: flex; flex-direction: column; gap: 6px; padding: 10px 10px 8px 14px; border: 1.5px solid transparent; border-radius: 12px; background: var(--surface-sunken, #f1f4f7); transition: background .15s, border-color .15s, box-shadow .15s; }
+.btw-ask-in.is-focus { background: var(--surface-card, #fff); border-color: var(--brand, #3065bd); box-shadow: 0 0 0 4px var(--brand-tint, #e7eefb); }
+.btw-ask-in textarea { min-height: 50px; max-height: 160px; resize: none; padding: 0; border: 0; outline: none; background: none; color: var(--fg-strong, #222a36); font: inherit; font-size: 14px; line-height: 1.6; }
+.btw-ask-in textarea::placeholder { color: var(--fg-faint, #778395); }
+.btw-ask-row { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; color: var(--fg-faint, #778395); }
+.btw-ask-row [data-btw-message] { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btw-ask-row [data-btw-message].warn { color: var(--status-warning, #8a5a00); }
+.btw-ask-drawer .btw-ask-send { flex: none; height: 30px; padding: 0 16px; border: 0; border-radius: var(--radius-pill, 999px); background: var(--brand, #3065bd); color: var(--brand-ink, #fff); font-size: 13px; font-weight: 500; }
+.btw-ask-drawer .btw-ask-send:hover { background: var(--brand-hover, var(--brand, #3065bd)); }
+.btw-ask-drawer .btw-ask-send:disabled { opacity: .45; cursor: not-allowed; }
+
+@keyframes btw-ask-slide { from { transform: translateX(24px); opacity: 0; } }
+@keyframes btw-ask-breath { 0%, 100% { opacity: .2; transform: scale(.8); } 50% { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .btw-ask-drawer, .btw-ask-dots i { animation: none; } }
+@media (max-width: 1360px) { .btw-ask-drawer { width: 400px; } }
