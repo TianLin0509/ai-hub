@@ -31,7 +31,14 @@ const noteModelProbe = () => null;
 const clearModelAvoid = () => null;
 const modelKey = () => null;
 const aliasMap = () => null;
-const normalizeAlias = () => null;
+// 代称写法（「个人」「号 1」）的核对与主干 core/codeagent-quota.js 同一实现（纯函数），队员版要用。
+function normalizeAlias(value) {
+  const s = String(value || '').trim();
+  if (!s) return '';
+  if (/^(个人|个人账号|personal)$/i.test(s)) return '个人';
+  const m = /^(?:号\s*|pool[-_\s]?|#)?(\d{1,2})$/i.exec(s);
+  return m && Number(m[1]) >= 1 ? `号 ${Number(m[1])}` : '';
+}
 const keyForAlias = () => null;
 const describeAvoid = () => null;
 const clock = () => null;

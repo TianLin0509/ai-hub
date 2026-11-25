@@ -682,6 +682,11 @@ const claudeAccountSwitch = require('./main/claude-account-switch').createClaude
   saveSession: session => sessionStore.saveSessionFile(session.id, session),
   // 换号后在新进程里接着原对话，并换一个新的原生会话编号（2026-10-28）。
   relaunch: (id, guard) => relaunchClaudeAfterAccountSwitch(id, guard),
+  // 前台换号（2026-11-25）：老前台没独立账号目录，第一次换号前先按原对话重开升级；换号进展写进前台对话记录并通知。
+  upgradeable: session => session?.purpose === 'hub-assistant' && !!assistantService?.frontNeedsAccountUpgrade?.('claude', session.id)
+    && assistantService.store.get('sessionId') === session.id,
+  upgrade: id => assistantService ? assistantService.makeFrontSwitchable(id) : { ok: false, message: '助理服务未就绪' },
+  onStatus: (id, status, message) => { if (sessionManager.getSession(id)?.purpose === 'hub-assistant') assistantService?.noteAccountSwitch?.(id, status, message); },
   // 跨出口换号前经目标线路实测出口 IP（2026-10-29）：专线对配置 IP，共享出口对已记录的基线。
   verifyRoute: profile => {
     const tools = require('./core/claude-subscription-profiles'), network = require('./core/claude-account-network');
@@ -2641,7 +2646,12 @@ if (require('./core/distribution').featureEnabled('assistant')) try {
       // overrides：助理切换模型时，休眠中的助理直接按新模型恢复，避免先按旧模型启动再重启。
       return meta ? resumeSession({ ...meta, ...(overrides ? { launchOverrides: overrides } : {}), hubId: id }) : null;
     },
-    restartSession: (id, overrides) => sessionOperations.restartSession(id, overrides),
+    restartSession: (id, overrides, options) => sessionOperations.restartSession(id, overrides, options || {}),
+    // 前台换号（2026-11-25）：新开前台沿用上一任的号时，跳过已标会员到期/风控/登出的号。
+    accountBlocked: profileId => { try { return !!accountRiskStore.manualBlock('claude', profileId) || accountRiskStore.isFlagged('claude', profileId); } catch { return false; } },
+    // 有两个以上订阅号、走订阅（不是 API）时才把前台建成可换号会话。
+    claudeAccountSwitchReady: () => { try { const config = getHubConfig(); return !!sessionManager.claudeAccountSwitch && config.claudeBackend !== 'api'
+      && require('./core/claude-subscription-profiles').normalizeProfiles(config.claudeSubscriptionProfiles).length > 1; } catch { return false; } },
     retireSession: async id => {
       const session = sessionManager.getSession(id);
       if (!session) return;
@@ -2734,8 +2744,10 @@ try {
   if (assistantService?.autoResumeCards) assistantService.autoResumeCards.resumer = args => autoResume.resumeByUser(args);
   // 自动续跑 P1 巡逻器（只提醒、不自动发）：每 60 秒扫打开着的会话，疑似停住就进「当前概览 → 续跑」Tab、侧栏打标记。
   const patrol = autoResume.startPatrol({
+    // 自动续次数、标红停手、熔断截止时间落盘：Hub 重启后接着算（第二批返工 1 第 4 条）。
+    stateFile: path.join(getHubDataDir(), 'auto-resume', 'patrol-state.json'),
     listSessions: () => [...sessionManager.sessions.values()].map(e => e && e.info).filter(s => s && s.id && s.status !== 'dormant' && s.transcriptPath && !s.hiddenFromSidebar)
-      .map(s => ({ id: s.id, kind: s.kind, title: s.title, transcriptPath: s.transcriptPath })),
+      .map(s => ({ id: s.id, kind: s.kind, title: s.title, transcriptPath: s.transcriptPath, runtimeBackend: s.runtimeBackend || null })),
     readEntries: file => require('./core/auto-resume/transcript-state').readTailEntries(file),
     facts: id => {
       const entry = sessionManager.sessions.get(id), info = entry?.info || {};
@@ -2746,9 +2758,19 @@ try {
       try { needsInput = require('./core/session-attention-state').sessionNeedsUserInput(sessionManager.getSession(id)); } catch {}
       return { role, processAlive: !!(entry && entry.pty && !entry.confirmedExit), turnActive: !!sessionManager.isAgentTurnActive(id), needsInput,
         userInputAt: require('./core/hub-assistant/user-input-marks').lastTypingAt(id) || 0, draftPending: !!promptOperations.hasDraft?.(id),
-        intent: autoResume.store.intent(id), autoResumeDisabled: info.autoResumeDisabled === true };
+        intent: autoResume.store.intent(id), autoResumeDisabled: info.autoResumeDisabled === true,
+        // 隔离端到端测试的 Hub 是不抢焦点的后台窗口：HUB_E2E_WINDOW_FOCUSED=1 时把窗口当作在前台（只在 CLAUDE_HUB_E2E=1 下生效）。
+        viewing: (() => {
+          const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+          let idleMs = Infinity; try { idleMs = powerMonitor.getSystemIdleTime() * 1000; } catch {}
+          return require('./core/auto-resume/patrol').isViewing({ selected: sessionManager.focusedSessionId === id && !!win, minimized: !!win && win.isMinimized(), idleMs,
+            windowFocused: !!win && (win.isFocused() || (process.env.CLAUDE_HUB_E2E === '1' && process.env.HUB_E2E_WINDOW_FOCUSED === '1')) });
+        })() };
     },
-    onChange: list => sendToRenderer('auto-resume:patrol', { stalled: list }),
+    mode: () => getHubConfig().autoResumePatrolMode,
+    // 额度重置后自动续（P2 扩到普通终端会话）：沿用已有「额度续跑」开关，默认关。
+    quotaAutoResume: () => getHubConfig().claudeQuotaAutoResume === true,
+    onChange: list => sendToRenderer('auto-resume:patrol', { stalled: list, breakers: autoResume.patrol ? autoResume.patrol.breakers() : [] }),
   }, {
     // 隔离端到端测试可把扫描间隔调短（判停阈值不变）；正式运行固定 60 秒。
     intervalMs: process.env.CLAUDE_HUB_E2E === '1' && Number(process.env.HUB_PATROL_INTERVAL_MS) > 0 ? Number(process.env.HUB_PATROL_INTERVAL_MS) : 60_000,
@@ -2760,6 +2782,16 @@ try {
       const hubConfig = require('./core/hub-config');
       const cfg = hubConfig.readConfigJsonForUpdate();
       cfg.autoResume = { ...(cfg.autoResume || {}), enabled: !!on };
+      hubConfig.saveConfig(cfg);
+      void patrol.scan();
+    },
+    mode: () => getHubConfig().autoResumePatrolMode,
+    breakers: () => patrol.breakers(),
+    // 三档：关（总开关关）/ 只提醒 / 自动续故障类。
+    setMode: m => {
+      const hubConfig = require('./core/hub-config');
+      const cfg = hubConfig.readConfigJsonForUpdate();
+      cfg.autoResume = { ...(cfg.autoResume || {}), enabled: m !== 'off', ...(m === 'off' ? {} : { patrolMode: m }) };
       hubConfig.saveConfig(cfg);
       void patrol.scan();
     },
@@ -3100,6 +3132,8 @@ try {
     afterQuotaCompact: sessionId => claudeQuotaPrecompact?.afterCompact(sessionId),
     quotaSkipped: async sessionId => claudeQuotaPrecompact?.skippedMarker(sessionId) === true,
     notify: (sessionId, message, level) => sendToRenderer('session-notice', { sessionId, message, level }),
+    // [soft-compact] 日志同时落盘（自动续跑 P2：19:17 现场跳过原因只在控制台，事后查不到）。超 1 MB 轮转一份。
+    logger: require('./main/soft-compact-controller').diskLogger(path.join(getHubDataDir(), 'logs', 'soft-compact.log')),
     // CodeAgent 的上下文占用只在屏幕右侧 Stats 面板上：PTY 缓冲经无界面 xterm 回放成当前一屏。
     readCodeAgentRows: async sessionId => {
       const entry = sessionManager.sessions?.get?.(sessionId);
@@ -4987,7 +5021,8 @@ app.whenReady().then(async () => {
         if (inherited) console.warn(`[codeagent-config] ${inherited.note}（变量 ${inherited.variable}，来源 ${inherited.origin}，${inherited.inPool ? '它落在号池目录里' : '它不在号池目录里'}）；个人账号目录来源：${require('./core/codeagent-config').configDirSource(startEnv)}`);
       } catch (error) { console.warn('[codeagent-config] 核对继承的配置目录失败：' + error.message); }
     });
-    const allowed = isIsolatedHub() ? !!process.env.AI_HUB_CODEAGENT_CONFIG_DIR : true;
+    // 不带 CodeAgent 的发行版（纯净版、队员版）不碰本机的 CodeAgent 配置目录（2026-11-26 审查）。
+    const allowed = !require('./core/distribution').kindAllowed('codeagent') ? false : isIsolatedHub() ? !!process.env.AI_HUB_CODEAGENT_CONFIG_DIR : true;
     if (allowed && fs.existsSync(codeagentConfig.configDir)) {
       // choiceGateMatcher：自动派活会话拒绝提问工具的 hook（core/auto-dispatch-rules.js，可关）。
       const settingsOptions = { events: require('./core/codeagent-config').HOOK_EVENTS,

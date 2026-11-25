@@ -10,7 +10,9 @@ const hookTurnKey = event => event.promptId ? `prompt:${event.promptId}` : event
 
 function createClaudeAccountSwitch({ claimContinue = null, releaseContinue = null, leaseWaitMs = 4 * 60_000, leaseWaits = 3,
   sleep = ms => new Promise(resolve => { const t = setTimeout(resolve, ms); t.unref?.(); }), sessionManager, broker, profiles, scopeFor,
-  sendToPty, drainSubmission = () => Promise.resolve(), saveSession, now = Date.now, relaunch = null, verifyRoute = null, isRiskFlagged = () => false, manualBlock = () => '' }) {
+  sendToPty, drainSubmission = () => Promise.resolve(), saveSession, now = Date.now, relaunch = null, verifyRoute = null, isRiskFlagged = () => false, manualBlock = () => '',
+  // 前台换号（2026-11-25）：还没独立账号目录、但允许先升级的会话（前台），换号或开自动换号前先升级一次；onStatus 把换号进展转给前台留痕。
+  upgradeable = () => false, upgrade = null, onStatus = null }) {
   const blockReason = id => { try { return manualBlock(id) || ''; } catch { return ''; } };
   const pending = new Map();
   const manualEpoch = new Map();
@@ -33,6 +35,18 @@ function createClaudeAccountSwitch({ claimContinue = null, releaseContinue = nul
   const eligible = session => managed(session) && session.claudeAutoSwitch === true;
   function publish(id, status, message, details = {}) {
     sessionManager.updateSessionMeta(id, { claudeSwitchStatus: { status, message, at: now(), ...details } });
+    if (typeof onStatus === 'function') { try { onStatus(id, status, message, details); } catch (error) { console.warn('[claude-switch] onStatus', error.message); } }
+  }
+  const canUpgrade = session => !managed(session) && typeof upgrade === 'function' && (() => { try { return upgradeable(session) === true; } catch { return false; } })();
+  // 先升级成可换号会话；升级不成功原样返回原因，会话保持原账号。
+  async function ensureManaged(id) {
+    const session = sessionManager.getSession(id);
+    if (managed(session)) return { ok: true };
+    if (!canUpgrade(session)) return { ok: false, message: '此旧会话未启用独立账号切换，请新建 Claude 订阅会话后使用' };
+    let result;
+    try { result = await upgrade(id); } catch (error) { result = { ok: false, message: error.message }; }
+    if (!result || result.ok === false) return { ok: false, message: result?.message || '升级为可换号会话失败' };
+    return managed(sessionManager.getSession(id)) ? { ok: true, upgraded: true } : { ok: false, message: '升级后仍未启用独立账号目录，保持原账号' };
   }
   function record(session, value) { atomicJson(fileFor(session), value); }
   // 2026-10-28: after the new login is installed, the conversation continues in a
@@ -160,6 +174,8 @@ function createClaudeAccountSwitch({ claimContinue = null, releaseContinue = nul
   }
   // 自动换号只由用户在账号下拉里逐个会话开启（2026-10-31）。
   function setAutoSwitch(id, enabled) {
+    // 前台还没升级：先升级再设开关（返回 Promise）；普通会话仍同步返回。
+    if (canUpgrade(sessionManager.getSession(id))) return ensureManaged(id).then(ready => ready.ok ? setAutoSwitch(id, enabled) : ready);
     const session = sessionManager.getSession(id);
     if (!managed(session)) return { ok: false, message: '此会话不能开启自动换号' };
     const updated = sessionManager.updateSessionMeta(id, { claudeAutoSwitch: enabled === true });
@@ -169,7 +185,8 @@ function createClaudeAccountSwitch({ claimContinue = null, releaseContinue = nul
   function accountOptions(id) {
     const session = sessionManager.getSession(id);
     if (!session || !/^claude(?:-resume)?$/.test(session.kind)) return { ok: false, message: '此会话不是 Claude 订阅会话' };
-    const canSwitch = !!managed(session);
+    const upgradeFirst = canUpgrade(session);
+    const canSwitch = !!managed(session) || upgradeFirst;
     const request = manualRequests.get(id);
     const accounts = profiles().map(profile => {
       let available = false, planMultiplier = 1;
@@ -187,6 +204,7 @@ function createClaudeAccountSwitch({ claimContinue = null, releaseContinue = nul
     }).sort(planTier.byPlanDesc); // 5X 号排最前（2026-11-06），同档保持原顺序。
     return { ok: true, currentProfile: session.claudeProfile || 'default', canSwitch, accounts, autoSwitch: session.claudeAutoSwitch === true,
       reason: canSwitch ? '' : '此旧会话未启用独立账号切换；新建 Claude 订阅会话后即可使用',
+      ...(upgradeFirst ? { upgradeFirst: true, note: '第一次换号会先把前台按原对话重开一次（约十几秒），之后随时可换' } : {}),
       pendingProfile: request?.profileId || null, pendingLabel: request?.label || null };
   }
   async function executeManual(id, request) {
@@ -267,6 +285,12 @@ function createClaudeAccountSwitch({ claimContinue = null, releaseContinue = nul
   }
   let requestSequence = 0;
   async function requestAccount(id, profileId, { cacheOnly = false } = {}) {
+    if (canUpgrade(sessionManager.getSession(id)) && profileId !== sessionManager.getSession(id)?.claudeProfile) {
+      try { const p = account(profileId), blocked = blockReason(p.id); if (blocked) return { ok: false, message: `${p.label || p.id}：${blocked}` }; }
+      catch (error) { return { ok: false, message: error.message }; }
+      const ready = await ensureManaged(id);
+      if (!ready.ok) return ready;
+    }
     const session = sessionManager.getSession(id);
     if (!managed(session)) return { ok: false, message: '此旧会话未启用独立账号切换，请新建 Claude 订阅会话后使用' };
     let profile;

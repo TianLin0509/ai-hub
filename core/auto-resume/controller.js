@@ -170,6 +170,12 @@ class AutoResume {
     if (this.queue.length && Number.isFinite(wait)) { this.timer = setTimeout(() => this.pump(), Math.max(50, wait)); this.timer.unref?.(); }
   }
 
+  async spacing() {
+    const sendAt = Math.max(this.d.now(), this.lastSendAt + this.spacingMs);
+    this.lastSendAt = sendAt;
+    if (sendAt > this.d.now()) await sleep(sendAt - this.d.now());
+  }
+
   async takeSlot() {
     if (this.sending < this.maxSending) { this.sending++; return; }
     await new Promise(resolve => this.slotWaiters.push(resolve));
@@ -250,12 +256,7 @@ class AutoResume {
     // 等名额可能很久：拿到名额先续租，续不上（过期被别人拿走）就不写，按「被挡」处理。
     keep();
     // 错峰（P2：移到 CLI 就绪之后、首次写入之前）：写入链路就绪后调 beforeWrite，这里先占住发送时刻再等，等完续租，写入链路再复核一次。
-    const beforeWrite = async () => {
-      const sendAt = Math.max(this.d.now(), this.lastSendAt + this.spacingMs);
-      this.lastSendAt = sendAt;
-      if (sendAt > this.d.now()) await sleep(sendAt - this.d.now());
-      keep();
-    };
+    const beforeWrite = async () => { await this.spacing(); keep(); };
     try {
       if (lostLease) receipt = { ok: false, notSent: true, message: '租约已过期' };
       else receipt = await this.d.sendPrompt(item.sessionId, resumeText(item.trigger), `auto-resume:${item.key}:${item.attempts}`.slice(0, 160), {
@@ -364,7 +365,7 @@ class AutoResume {
   startPatrol(deps = {}, options = {}) {
     if (this.patrol || this.closed) return this.patrol;
     const { Patrol } = require('./patrol');
-    this.patrol = new Patrol({ now: this.d.now, enabled: this.d.enabled, ledger: this.ledger, ...deps }, options);
+    this.patrol = new Patrol({ now: this.d.now, enabled: this.d.enabled, ledger: this.ledger, autoSend: (r, o) => this.autoFromPatrol(r, o), ...deps }, options);
     if (options.autoStart !== false) this.patrol.start();
     return this.patrol;
   }
@@ -375,7 +376,7 @@ class AutoResume {
     const r = this.patrol?.get(sessionId);
     if (!r) return { ok: false, error: '这条提醒已经不在了（会话可能已接着干活）' };
     if (!r.canResume) return { ok: false, error: r.action === 'login' ? '需要先重新登录，续跑发不出去' : '在等额度，交给额度续跑 / 自动换号' };
-    if (this.queue.some(q => q.sessionId === sessionId) || [...this.running].some(q => q.sessionId === sessionId)) {
+    if (this.p0Busy(sessionId) || this.patrol.isPending(sessionId)) {
       return { ok: false, error: 'Hub 正在自动续跑这个会话，没有重复发' };
     }
     const fresh = this.patrol.recheck(sessionId);
@@ -385,9 +386,79 @@ class AutoResume {
       return { ok: false, error: `它已经不像停住了（${fresh.reason}），没有发` };
     }
     const result = await this.resumeByUser({ sessionId, batch: `patrol-${sessionId}-${r.since}`, trigger: 'patrol', interruption: `patrol-${r.since}`, text: patrolResumeText(r.label) });
-    if (result?.ok) this.patrol.resolve(sessionId, '用户点了续跑');
+    if (result?.ok) { this.patrol.resolve(sessionId, '用户点了续跑'); this.patrol.clearAuto(sessionId); } // 亲手续跑：标红停手解除
     try { this.patrol.d.onChange(this.patrol.list()); } catch {}
     return result;
+  }
+
+  p0Busy(sessionId) { return this.queue.some(q => q.sessionId === sessionId) || [...this.running].some(q => q.sessionId === sessionId); }
+
+  // P2 巡逻自动续（故障类 / 额度重置后）：与 P0、按钮、换号、软压缩共用同一套认领和租约，共用发送名额与错峰。
+  // 返回 { outcome:'sent'|'uncertain'|'not-sent'|'skipped'|'blocked'|'deferred'|'declined', reason, retryAt }；结果另记一张卡（近 3 天记录）。
+  async autoFromPatrol(r, { owner = 'patrol', key, label, attempt = 1 } = {}) {
+    const sid = r.sessionId;
+    const skip = reason => ({ outcome: 'skipped', reason });
+    const quota = owner === 'quota-resume';
+    const later = (outcome, reason, ms = 60_000) => ({ outcome, reason, retryAt: this.d.now() + ms });
+    if (this.closed) return skip('Hub 正在退出');
+    const allowed = () => this.patrol ? this.patrol.eligible(sid, { quota }) : { ok: !!this.d.enabled(), reason: '自动续跑总开关已关' };
+    { const a = allowed(); if (!a.ok) return later('declined', a.reason); }
+    if (this.p0Busy(sid)) return later('deferred', 'Hub 自动续跑正在处理这个会话');
+    if (!this.d.getLive(sid)) return skip('会话不在运行');
+    const fresh = this.patrol?.recheck(sid) || { ok: false, reason: '提醒已经不在' };
+    if (!fresh.ok) return skip(fresh.reason);
+    const claim = claimResume(this.d.dataDir, sid, key, owner, { now: this.d.now() });
+    if (!claim.ok) return skip(claim.by === owner ? '这一回合已经自动续过' : `${ownerLabel(claim.by)}已经接手`);
+    const blocked = held => {
+      this._safe(() => releaseClaim(this.d.dataDir, sid, key, owner));
+      return { outcome: 'blocked', by: held.by, label: ownerLabel(held.by), reason: `${ownerLabel(held.by)}正在给它发，等它发完再看`, retryAt: this.d.now() + leaseRetryDelay(held, this.d.now()) };
+    };
+    const lease = claimSession(this.d.dataDir, sid, owner, { now: this.d.now(), note: r.cause });
+    if (!lease.ok) return blocked(lease);
+    const token = lease.token;
+    const item = { sessionId: sid, batch: `patrol-auto-${sid}-${r.since}`, trigger: 'patrol', interruption: key, key: `${sid}|patrol-auto|${key}`,
+      attempts: attempt, by: owner === 'quota-resume' ? 'quota-resume' : 'patrol-auto', title: r.title };
+    let receipt, gateOk = true, lostLease = false, declined = null;
+    const keep = () => { if (!lostLease && !renewSession(this.d.dataDir, sid, token, { now: this.d.now() })) lostLease = true; return !lostLease; };
+    await this.takeSlot();
+    keep(); // 等名额可能很久：先续租，丢了就不写
+    try {
+      if (lostLease) receipt = { ok: false, notSent: true, message: '租约已过期' };
+      else receipt = await this.d.sendPrompt(sid, patrolResumeText(label || r.label), `auto-resume:patrol:${sid}:${key}:${attempt}`.slice(0, 160), {
+        beforeWrite: async () => { await this.spacing(); keep(); },
+        shouldWrite: () => {
+          if (lostLease || !holdsSession(this.d.dataDir, sid, token, { now: this.d.now() })) { lostLease = true; return false; }
+          const a = allowed(); if (!a.ok) { declined = a.reason; return false; }
+          gateOk = !!this.patrol?.recheck(sid)?.ok; return gateOk;
+        },
+      });
+    } catch (error) { receipt = { ok: false, notSent: !!error.notSent, message: error.message }; }
+    finally { this.releaseSlot(); }
+    const session = this.sessionInfo(sid);
+    const what = owner === 'quota-resume' ? '额度重置后自动续' : `巡逻自动续（第 ${attempt} 次）`;
+    // 复核拒绝但正文已写进输入框：按结果不明，不还租约、不重发。
+    if ((lostLease || !gateOk || declined) && receipt?.written === true) {
+      this.record(item, session, 'uncertain', 'patrol-auto', `${what}：${r.label}，续跑语已写进输入框但没提交，未重发`);
+      return { outcome: 'uncertain', reason: '已写入未提交' };
+    }
+    if (lostLease) {
+      this._safe(() => releaseSession(this.d.dataDir, sid, token));
+      const holder = readLease(this.d.dataDir, sid);
+      return blocked(holder ? { by: holder.owner, until: holder.until } : { by: 'busy' });
+    }
+    if (declined) {
+      this._safe(() => releaseSession(this.d.dataDir, sid, token)); this._safe(() => releaseClaim(this.d.dataDir, sid, key, owner));
+      return later('declined', declined);
+    }
+    if (!gateOk) {
+      this._safe(() => releaseSession(this.d.dataDir, sid, token)); this._safe(() => releaseClaim(this.d.dataDir, sid, key, owner));
+      return skip('写入前重判：已经不像停住了');
+    }
+    const outcome = classifyReceipt(receipt);
+    if (outcome === 'sent') { this.record(item, session, 'resumed', 'patrol-auto', `${what}：${r.label}，已收到开工确认`); return { outcome: 'sent' }; }
+    if (outcome === 'uncertain') { this.record(item, session, 'uncertain', 'patrol-auto', `${what}：${r.label}，送达结果不明（${receiptText(receipt) || '没有拿到开工确认'}），未重发`); return { outcome: 'uncertain', reason: receiptText(receipt) }; }
+    this._safe(() => releaseSession(this.d.dataDir, sid, token)); this._safe(() => releaseClaim(this.d.dataDir, sid, key, owner));
+    return { outcome: 'not-sent', reason: receiptText(receipt) || '没发出去' };
   }
 
   close() { this.closed = true; clearTimeout(this.timer); clearTimeout(this.rescanTimer); this.timer = null; try { this.patrol?.stop(); } catch {} }

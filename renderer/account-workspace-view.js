@@ -103,7 +103,8 @@ function mailboxHtml(c, mail, esc, edit, legacyRemote = false) {
   const part = (email, kind, canOpen, hasPassword, which) => email ? `<span class="ac-mail-item">${esc(email + (kind ? '（' + (MAIL_KIND[kind] || kind) + '）' : ''))}${legacyRemote && canOpen ? `<button class="ac-text-btn" data-ac="mail-open" data-profile="${esc(id)}" data-which="${which}">打开邮箱 ↗</button>` : ''}${hasPassword ? `<button class="ac-text-btn" data-ac="mail-copy" data-profile="${esc(id)}" data-which="${which}">复制密码</button>` : '<small>未存密码</small>'}</span>` : '';
   return `<p class="ac-mailbox"><span class="ac-mail-label">邮箱</span>${part(m.email, m.provider, m.canOpen, m.hasPassword, 'main') || '<span class="ac-mail-item">未填登录邮箱</span>'}${m.hasTotp ? `<button class="ac-text-btn" data-ac="mail-copy" data-profile="${esc(id)}" data-which="totp">复制 2FA 码</button>` : ''}${m.recoveryEmail ? '<span class="ac-mail-label">辅助</span>' + part(m.recoveryEmail, m.recoveryProvider, m.canOpenRecovery, m.hasRecoveryPassword, 'recovery') : ''}${m.note ? `<span class="ac-mail-note">${esc(m.note)}</span>` : ''}${edit_}</p>`;
 }
-// 2026-11-21：Antigravity 专线。新建时选出口；「本机代理」= 沿用 Hub 全局代理（旧做法，不建远程浏览器）。
+// 2026-11-21：Antigravity 专线。新建时选出口；「本机代理」= 沿用 Hub 全局代理（旧做法）。
+// 2026-11-25：多条专线可选；Google 登录和授权都在本机专用浏览器里完成，浏览器只走这个账号的专线。
 function agyRoutesHtml(data, chosen, esc, action, withShared = true) {
   const routes = [...(withShared ? [{ id: 'shared', name: '本机代理（不走专线）', selectable: true, note: '沿用 Hub 全局代理，Google 登录在本机浏览器' }] : []),
     ...(data?.routes || []).map(r => ({ ...r, note: r.ip + ' · ' + (r.vpsName || r.vps || '') + ' · 已有 ' + r.agyCount + ' 个 Antigravity 账号' }))];
@@ -113,20 +114,23 @@ function newAgyExitHtml(edit, data, esc) {
   if (!data || data.enabled === false) return '';
   if (!data.routes) return '<p class="ac-tool-help">正在读取可用专线…</p>';
   const chosen = edit.exit || (data.routes.find(r => r.selectable)?.id || 'shared');
-  return `<p class="ac-tool-help">选专线后会在出口所在 VPS 上建这个账号独占的远程浏览器：Google 登录、授权和日常使用都走同一个 IP，建好后不再更换。</p>${data.error ? `<p class="ac-item-error">${esc(data.error)}</p>` : ''}${agyRoutesHtml(data, chosen, esc, 'agy-exit-select')}`;
+  return `<p class="ac-tool-help">选专线后，Google 登录和授权在本机的专用浏览器里完成，那个浏览器只走这条专线；日常使用也是同一个 IP。授权前可以改选，授权后锁定。</p>${data.error ? `<p class="ac-item-error">${esc(data.error)}</p>` : ''}${agyRoutesHtml(data, chosen, esc, 'agy-exit-select')}`;
 }
 function agyExitHtml(c, data, esc, edit) {
   if (!data || data.enabled === false) return '';
   const id = c.profileId || 'default', b = data.bindings?.[id];
+  if (id === 'default') return '<p class="ac-tool-help">我的账号用系统钥匙串登录，不能绑定专线；要走专线请新建一个 Antigravity 账号。</p>';
+  if (edit?.mode === 'agy-bind' && edit.profileId === id && !(b && b.authorized)) {
+    const chosen = edit.exit || b?.exit || data.routes?.find(r => r.selectable)?.id || '';
+    return `<section class="ac-codex-exit ac-account-form" aria-label="选择专线"><strong>${b ? '改选专线' : '绑定专线'}</strong><p class="ac-tool-help">${esc('Google 登录和授权在本机专用浏览器里完成，浏览器只走选中的专线。授权前可以改选，授权后锁定。')}</p>${edit.error ? `<p class="ac-item-error" role="alert">${esc(edit.error)}</p>` : ''}${agyRoutesHtml({ routes: (data.routes || []) }, chosen, esc, 'agy-bind-select', false)}<div class="ac-row-actions"><button class="ac-open" data-ac="agy-bind-save" data-profile="${esc(id)}" ${chosen && chosen !== b?.exit ? '' : 'disabled'}>保存专线</button><button class="ac-text-btn" data-ac="account-cancel">取消</button></div></section>`;
+  }
   if (b) {
     const result = data.checks?.[id];
     const check = result ? `<span class="ac-keeper-check ${result.check?.status === 'ok' ? 'acb-ok' : 'acb-faint'}">${esc(result.error ? '检查失败：' + result.error : '专线检查 · 出口 ' + result.check.ip + ' · 正常')}</span>` : '<span class="ac-keeper-check acb-faint">尚未检查</span>';
-    return `<section class="ac-codex-exit" aria-label="专线与远程浏览器"><strong>专线与远程浏览器</strong><p>${esc(b.ip + ' · ' + b.name + (b.vpsName ? ' · 所在 VPS：' + b.vpsName : ''))}</p><p>${esc('已锁定，IP 不会变 · 本机经 ' + b.proxy.replace('http://', '') + ' 出去 · VPS 远程浏览器 ' + (b.loginEnv || '未建'))}</p><p>${check} <button class="ac-text-btn" data-ac="agy-exit-check" data-profile="${esc(id)}" ${data.checking ? 'disabled' : ''}>${data.checking === id ? '检查中…' : '检查专线'}</button></p></section>`;
-  }
-  if (id === 'default') return '<p class="ac-tool-help">我的账号用系统钥匙串登录，不能绑定专线；要走专线请新建一个 Antigravity 账号。</p>';
-  if (edit?.mode === 'agy-bind' && edit.profileId === id) {
-    const chosen = edit.exit || data.routes?.find(r => r.selectable)?.id || '';
-    return `<section class="ac-codex-exit ac-account-form" aria-label="绑定专线"><strong>绑定专线</strong><p class="ac-tool-help">绑定后这个账号要在远程浏览器里重新登录一次 Google；出口建好后不再更换。</p>${edit.error ? `<p class="ac-item-error" role="alert">${esc(edit.error)}</p>` : ''}${agyRoutesHtml({ routes: (data.routes || []) }, chosen, esc, 'agy-bind-select', false)}<div class="ac-row-actions"><button class="ac-open" data-ac="agy-bind-save" data-profile="${esc(id)}" ${chosen ? '' : 'disabled'}>绑定并建远程浏览器</button><button class="ac-text-btn" data-ac="account-cancel">取消</button></div></section>`;
+    const auth = b.lastAuth ? '上次授权 ' + new Date(b.lastAuth.at).toLocaleString('zh-CN', { hour12: false }) + ' · ' + (b.lastAuth.via || '本机浏览器') + ' · 出口 ' + b.lastAuth.ip
+      : b.authorized ? '已授权（授权记录早于本版）' : '尚未授权：点「授权」会打开这个账号的专用浏览器（只走这条专线）';
+    const lock = b.authorized ? '已授权，专线锁定' : '尚未授权，可改选专线';
+    return `<section class="ac-codex-exit" aria-label="专线与本机专用浏览器"><strong>专线与本机专用浏览器</strong><p>${esc(b.ip + ' · ' + b.name + (b.vpsName ? ' · 所在 VPS：' + b.vpsName : ''))}</p><p>${esc(lock + ' · 本机经 ' + b.proxy.replace('http://', '') + ' 出去')}</p><p>${esc(auth)}</p><p>${check} <button class="ac-text-btn" data-ac="agy-exit-check" data-profile="${esc(id)}" ${data.checking ? 'disabled' : ''}>${data.checking === id ? '检查中…' : '检查专线'}</button>${b.authorized ? '' : ` <button class="ac-text-btn" data-ac="agy-bind-edit" data-profile="${esc(id)}">改选专线</button>`}</p></section>`;
   }
   return `<p class="ac-tool-help">${esc('未走专线：现在经 Hub 全局代理出去，Google 登录在本机浏览器。')}<button class="ac-text-btn" data-ac="agy-bind-edit" data-profile="${esc(id)}">绑定专线</button></p>`;
 }

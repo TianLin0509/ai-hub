@@ -15,7 +15,8 @@ const restoreDefaults = () => null;
 const guardDefaults = () => null;
 const normalizeConfigDir = () => null;
 const modelAllowed = () => null;
-const openSessionScreen = async () => null;
+// 读屏是通用工具（「问一下」对普通 Claude 会话也用），复用真实现，不能写成空函数（2026-11-26）。
+const { openSessionScreen } = require('./session-screen');
 const pickModel = async () => null;
 const schedulePick = async () => null;
 const waitForPick = async () => null;

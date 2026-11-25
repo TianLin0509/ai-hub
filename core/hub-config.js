@@ -201,6 +201,9 @@ function getConfig() {
     // 默认开；config.json 写 "autoResume": { "enabled": false } 或环境变量 HUB_AUTO_RESUME=0 关闭。
     autoResumeEnabled: process.env.HUB_AUTO_RESUME === '0' ? false
       : process.env.HUB_AUTO_RESUME === '1' ? true : rawConfig.autoResume?.enabled !== false,
+    // 巡逻器（P2）：'remind' 只提醒（默认）；'auto' 故障类（报错、回复半截、送达未开工、压缩后没接上、重启 / 重开）自动续。
+    // config.json 写 "autoResume": { "patrolMode": "auto" }；续跑 Tab 底栏三档开关写的就是这里。
+    autoResumePatrolMode: rawConfig.autoResume?.patrolMode === 'auto' ? 'auto' : 'remind',
   };
 
   return _cachedConfig;

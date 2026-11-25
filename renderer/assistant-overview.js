@@ -17,7 +17,7 @@ const REPLY = { delivered: ['✓ 已送达', 'ok'], read: ['✓ 已读（已开�
 function createAssistantOverview({ document, window, ipcRenderer, showMessage = () => {}, openSession = async () => {} }) {
   const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let root = null, data = null, tab = 'd', curD = null, page = 0, showDone = false, mode = 'pending', lp = 0, timer = null, loading = false, confirmAll = null, skipping = false, skipNote = '';
-  let ar = null, stalled = [], arEnabled = true, curR = null, rp = 0, arPage = 0;
+  let ar = null, stalled = [], arEnabled = true, arMode = 'remind', breakers = [], curR = null, rp = 0, arPage = 0;
   const stallBadges = new Set();
   const arBusy = new Set();
   // 草稿、选中的选项、发送结果都按「条目 + 问题版本」保存：负责人改了问题，旧的选择不会带到新问题上（审查 2026-11-25 第 1 项）。
@@ -34,7 +34,7 @@ function createAssistantOverview({ document, window, ipcRenderer, showMessage = 
       if (!r || r.ok === false) throw new Error(r?.error || '前台服务暂未就绪');
       data = r; paintBadges();
       // 续跑记录另走 assistant:auto-resume，读不到不影响另两个 Tab。
-      try { const a = await ipcRenderer.invoke('assistant:auto-resume', { action: 'list' }); ar = a?.cards || []; stalled = a?.stalled || []; arEnabled = a?.enabled !== false; } catch { ar = ar || []; }
+      try { const a = await ipcRenderer.invoke('assistant:auto-resume', { action: 'list' }); ar = a?.cards || []; stalled = a?.stalled || []; arEnabled = a?.enabled !== false; arMode = a?.mode || (arEnabled ? 'remind' : 'off'); breakers = a?.breakers || []; } catch { ar = ar || []; }
       paintBadges();
     } finally { loading = false; }
     return data;
@@ -51,6 +51,7 @@ function createAssistantOverview({ document, window, ipcRenderer, showMessage = 
   // 巡逻器一有变化（新提醒、消失）主进程就推过来，角标和 Tab 立刻跟上。
   ipcRenderer.on?.('auto-resume:patrol', (_event, payload = {}) => {
     stalled = Array.isArray(payload.stalled) ? payload.stalled : [];
+    if (Array.isArray(payload.breakers)) breakers = payload.breakers;
     paintBadges();
     if (root && !root.hidden && tab === 'r') paint();
   });
@@ -94,6 +95,7 @@ function createAssistantOverview({ document, window, ipcRenderer, showMessage = 
     else if (a === 'ar-patrol') void patrolAct('patrol-resume', b.dataset.ovSid);
     else if (a === 'ar-ignore') void patrolAct('patrol-dismiss', b.dataset.ovSid);
     else if (a === 'ar-toggle') void toggleAutoResume();
+    else if (a === 'ar-mode') void setPatrolMode(b.dataset.ovPmode);
     else if (a === 'rprev') { rp = Math.max(0, rp - 1); paint(); }
     else if (a === 'rnext') { rp++; paint(); }
     else if (a === 'arprev') { arPage = Math.max(0, arPage - 1); paint(); }
@@ -259,7 +261,15 @@ function createAssistantOverview({ document, window, ipcRenderer, showMessage = 
     catch (error) { showMessage('开关没改成：' + error.message); }
     await refresh();
   }
+  // 三档：关 / 只提醒 / 自动续故障类（P2）。
+  async function setPatrolMode(mode) {
+    if (!mode || mode === arMode) return;
+    try { const r = await ipcRenderer.invoke('assistant:auto-resume', { action: 'set-mode', mode }); arMode = r?.mode || mode; arEnabled = r?.enabled !== false; }
+    catch (error) { showMessage('档位没改成：' + error.message); }
+    await refresh();
+  }
   const arTrig = (t, long = false) => t === 'hub-restart' ? (long ? 'Hub 重启后自动续跑' : 'Hub 重启') : t === 'patrol' ? (long ? '巡逻提醒后续跑' : '巡逻提醒') : (long ? 'CLI 进程重开后自动续跑' : 'CLI 进程重开');
+  const arTitle = (c, long = false) => c.trigger === 'patrol' && (c.rows || []).some(r => r.by === 'patrol-auto' || r.by === 'quota-resume') ? (long ? '巡逻自动续' : '自动续') : arTrig(c.trigger, long);
   const arCount = (c, act) => (c.rows || []).filter(r => (act === 'skipped' ? r.action === 'skipped' || r.action === 'failed' : r.action === act)).length;
   const arTime = at => at ? new Date(at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '';
   const arCan = c => (c.rows || []).filter(r => r.canResume && r.action !== 'resumed').length;
@@ -272,19 +282,20 @@ function createAssistantOverview({ document, window, ipcRenderer, showMessage = 
     const pages = Math.max(1, Math.ceil(items.length / LEFT_ROWS)); rp = Math.min(rp, pages - 1);
     const shown = items.slice(rp * LEFT_ROWS, rp * LEFT_ROWS + LEFT_ROWS);
     if (!curR || !items.some(x => x.id === curR)) curR = shown[0]?.id || null;
-    let left = `<div class="ov-left-head"><b>现在停着 ${stops.length}</b><span>近 3 天记录 ${cards.length}</span></div><div class="ov-list">`;
+    let left = `<div class="ov-left-head"><b>现在停着 ${stops.length}</b><span>近 3 天记录 ${cards.length}</span></div>`
+      + (breakers || []).map(b => `<div class="ov-ar-breaker" title="${esc(b.text)}">⚠ ${esc(b.text)}</div>`).join('') + '<div class="ov-list">';
     let lastKind = null;
     for (const x of shown) {
       if (x.kind !== lastKind) { if (x.kind === 'card' && lastKind === 'stall') left += '<div class="ov-ar-sec">近 3 天记录</div>'; lastKind = x.kind; }
       if (x.kind === 'stall') {
         const s = x.s, chip = s.action === 'remind' ? ['bad', s.label] : ['warn', s.label];
-        left += `<button type="button" class="ov-li${x.id === curR ? ' on' : ''}" data-ov-r="${esc(x.id)}"><span class="ov-li-top"><b>${esc(s.title)}</b><span class="ov-chip ${chip[0]}">${esc(chip[1])}</span></span>`
-          + `<span class="ov-li-q">${esc(s.evidence)}</span><span class="ov-li-meta"><span>已停 ${esc(s.idleText)}</span>${s.role === 'member' ? '<span>成员 · 负责人会看到</span>' : ''}</span></button>`;
+        left += `<button type="button" class="ov-li${x.id === curR ? ' on' : ''}${s.autoStopped ? ' ov-li-stop' : ''}" data-ov-r="${esc(x.id)}"><span class="ov-li-top"><b>${esc(s.title)}</b><span class="ov-chip ${chip[0]}">${esc(chip[1])}</span>${s.autoStopped ? '<span class="ov-chip bad">已停自动续</span>' : ''}</span>`
+          + `<span class="ov-li-q">${esc(s.autoNote || s.evidence)}</span><span class="ov-li-meta"><span>已停 ${esc(s.idleText)}</span>${s.autoCount ? `<span>已自动续 ${s.autoCount} 次</span>` : ''}${s.role === 'member' ? '<span>成员 · 负责人会看到</span>' : ''}</span></button>`;
         continue;
       }
       const c = x.c, can = arCan(c);
       const tags = [['resumed', 'ok', '已续'], ['uncertain', 'warn', '需核对'], ['skipped', 'mute', '未续']].map(([k, cls, label]) => arCount(c, k) ? `<span class="ov-chip ${cls}">${label} ${arCount(c, k)}</span>` : '').join('');
-      left += `<button type="button" class="ov-li${c.id === curR ? ' on' : ''}" data-ov-r="${esc(c.id)}"><span class="ov-li-top"><b>${arTrig(c.trigger)}</b><span class="ov-tags">${tags}</span></span>`
+      left += `<button type="button" class="ov-li${c.id === curR ? ' on' : ''}" data-ov-r="${esc(c.id)}"><span class="ov-li-top"><b>${arTitle(c)}</b><span class="ov-tags">${tags}</span></span>`
         + `<span class="ov-li-q">${esc(c.trigger === 'hub-restart' ? `检查了 ${(c.rows || []).length} 个会话` : (c.rows?.[0]?.title || ''))}${can ? ` · ${can} 个等你决定续不续` : ''}</span><span class="ov-li-meta"><span>${esc(arTime(c.startedAt || c.at))}</span>${c.state === 'dismissed' ? '<span>提示条已收起</span>' : ''}</span></button>`;
     }
     left += '</div>';
@@ -293,10 +304,14 @@ function createAssistantOverview({ document, window, ipcRenderer, showMessage = 
     let right = '';
     if (sel?.kind === 'stall') {
       const s = sel.s, busy = arBusy.has('patrol|' + s.sessionId);
-      const why = s.action === 'login' ? '登录失效：先在账号页重新登录，续跑语现在发不出去。' : s.action === 'quota' ? '额度用尽：交给已有的额度续跑 / 自动换号，这里不重复发。' : '只提醒、不自动发：点「续跑」由你决定发一次续跑语（带原因和自查步骤）。';
+      const why = s.action === 'login' ? '登录失效：先在账号页重新登录，续跑语现在发不出去。'
+        : s.action === 'quota' ? (s.autoNote || '额度用尽：交给额度续跑 / 自动换号，这里不重复发。')
+        : s.autoStopped ? `连续 ${s.autoCount || 3} 次自动续都没产出，已停自动续：请打开会话看一眼再决定。`
+        : arMode === 'auto' && s.autoNote ? s.autoNote
+        : '只提醒、不自动发：点「续跑」由你决定发一次续跑语（带原因和自查步骤）。';
       right = `<div class="ov-g-head"><h3>${esc(s.title)}</h3><span>疑似停住 · 已停 ${esc(s.idleText)}</span></div>`
         + `<div class="ov-row"><div class="ov-row-top"><span class="ov-chip ${s.action === 'remind' ? 'bad' : 'warn'}">${esc(s.label)}</span></div>`
-        + `<div class="ov-row-line">${esc(s.evidence)}</div><div class="ov-row-meta">停住时间 ${esc(arTime(s.since))} · 发现时间 ${esc(arTime(s.at))}${s.role === 'lead' ? ' · 负责人' : s.role === 'member' ? ' · 成员（提醒只进这里和账本，负责人看组队心跳）' : ''}</div></div>`
+        + `<div class="ov-row-line">${esc(s.evidence)}</div>${s.autoNote ? `<div class="ov-row-line${s.autoStopped ? ' ov-warn-inline' : ''}">自动续：${esc(s.autoNote)}${s.autoCount ? `（已续 ${s.autoCount} 次）` : ''}</div>` : ''}<div class="ov-row-meta">停住时间 ${esc(arTime(s.since))} · 发现时间 ${esc(arTime(s.at))}${s.role === 'lead' ? ' · 负责人' : s.role === 'member' ? ' · 成员（提醒只进这里和账本，负责人看组队心跳）' : ''}</div></div>`
         + `<div class="ov-send"><span>${esc(why)}</span>`
         + `<button type="button" class="ov-skip" data-ov="ar-ignore" data-ov-sid="${esc(s.sessionId)}" title="这一回合不再提醒">忽略</button>`
         + `<button type="button" class="ov-skip" data-ov-open="${esc(s.sessionId)}">打开会话</button>`
@@ -304,7 +319,7 @@ function createAssistantOverview({ document, window, ipcRenderer, showMessage = 
         + '</div>';
     } else if (sel?.kind === 'card') {
       const c = sel.c, rows = c.rows || [], pg = Math.max(1, Math.ceil(rows.length / AR_ROWS)); arPage = Math.min(arPage, pg - 1);
-      right = `<div class="ov-g-head"><h3>${arTrig(c.trigger, true)}</h3><span>${esc(arTime(c.startedAt || c.at))} · 已续 ${arCount(c, 'resumed')}、需核对 ${arCount(c, 'uncertain')}、未续 ${arCount(c, 'skipped')}</span></div>`
+      right = `<div class="ov-g-head"><h3>${arTitle(c, true)}</h3><span>${esc(arTime(c.startedAt || c.at))} · 已续 ${arCount(c, 'resumed')}、需核对 ${arCount(c, 'uncertain')}、未续 ${arCount(c, 'skipped')}</span></div>`
         + rows.slice(arPage * AR_ROWS, arPage * AR_ROWS + AR_ROWS).map(r => {
           const s = AR_ACT[r.action] || [r.action, 'mute'], busy = arBusy.has(c.id + '|' + r.id), can = r.canResume && r.action !== 'resumed';
           return `<div class="ov-row"><div class="ov-row-top"><button type="button" class="ov-link" data-ov-open="${esc(r.id)}" title="打开这个会话">${esc(r.title)} ↗</button><span class="ov-chip ${s[1]}">${s[0]}</span>${can ? `<button type="button" class="ov-go" data-ov="ar-go" data-ov-for="${esc(c.id)}" data-ov-sid="${esc(r.id)}" title="给这个会话发一次续跑语"${busy ? ' disabled' : ''}>${busy ? '发送中…' : '续跑'}</button>` : ''}</div>`
@@ -339,7 +354,7 @@ function createAssistantOverview({ document, window, ipcRenderer, showMessage = 
     const f = d.filtered;
     root.querySelector('.ov-foot').innerHTML = tab === 'd'
       ? `<span>只列负责人一级要你定的事，成员的问题由负责人汇总后再报。${f.skipsIssue ? `<b class="ov-warn-inline">${esc(f.skipsIssue)}</b>` : ''}</span><span>回复以「用户」身份发到对应会话</span>`
-      : tab === 'r' ? `<span>巡逻只提醒、不自动发；只有 Hub 在后台拉起的会话才自动续，你亲自打开的、在等你拍板的点「续跑」由你决定。</span><span class="ov-ar-switch">自动续跑总开关：<b>${arEnabled ? '开' : '关'}</b><button type="button" class="ov-mode" data-ov="ar-toggle">${arEnabled ? '关闭' : '打开'}</button></span>`
+      : tab === 'r' ? `<span>${arMode === 'auto' ? '报错、回复半截、送达没开工、压缩后没接上、重启 / 重开这几类，你没在看的会话自动续（最多 3 次，越往后隔得越久）；其余只提醒。' : arMode === 'off' ? '自动续跑已关：不巡逻、不自动续。' : '巡逻只提醒、不自动发；点「续跑」由你决定。'}</span><span class="ov-ar-switch">巡逻：${[['off', '关'], ['remind', '只提醒'], ['auto', '自动续故障类']].map(([m, t]) => `<button type="button" class="ov-mode${arMode === m ? ' on' : ''}" data-ov="ar-mode" data-ov-pmode="${m}" aria-pressed="${arMode === m}">${t}</button>`).join('')}</span>`
       : '<span>每个任务一行：项目只显示负责人，成员不单列；一句话进展取负责人进展卡，没写卡的取最近答复。</span><span>点会话名可直接打开</span>';
     if (fid) { const el = root.querySelector(`[data-ov-draft="${CSS.escape(fid)}"]`); if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch {} } }
   }

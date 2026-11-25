@@ -27,6 +27,8 @@ const fs = require('fs');
 const MARKER_RE = /\[\[hub:compact(-continue)?\]\]/;
 const CONTINUE_PROMPT = '（Hub 提示：上下文已自动压缩。先读本任务的进展卡，确认当前步骤和下一步，再接着做。）';
 const SKIP_CONTINUE_PROMPT = '（Hub 提示：额度情况已变化，这次不压缩也不换号。先读本任务的进展卡，确认当前步骤和下一步，再接着做。）';
+// 写了「压完继续」但上下文没到压缩门槛（或刚压过）：不压缩，直接让它接着做（自动续跑 P2，负责人 #29：19:17 现场 525,913 < 540,000 停了 22 分钟）。
+const BELOW_THRESHOLD_CONTINUE_PROMPT = '（Hub 提示：上下文还没到压缩门槛，这次不压缩，直接接着做。先看一眼本任务的进展卡，确认当前步骤和下一步，再继续。）';
 // 与提醒钩子同一条软线；端到端测试经同名环境变量压低。
 const SOFT_TOKENS = Number(process.env.SOFT_COMPACT_SOFT_TOKENS) || 600_000;
 const TAIL_BYTES = 4 * 1024 * 1024;
@@ -111,6 +113,10 @@ function createSoftCompactController(deps = {}) {
   if (!sessionManager) throw new Error('soft-compact-controller 缺少 sessionManager');
   const compacting = new Map();
   const lastDone = new Map();
+  // 未达门槛补发「接着做」按压缩事件记（第二批返工 1 第 6 条）：每次压缩结束 epoch +1；同一个 epoch 里只补发一次——
+  // 补发后那一轮 AI 照抄旧标记、隔多久再停都不再触发，出现新的压缩事件才重置。
+  const compactEpoch = new Map(); // sid → 压缩结束次数
+  const belowSent = new Map();    // sid → 补发时的 epoch
   // CodeAgent 每个会话：{ failures 连续失败次数, lastEnd 上次尝试结束时间, halted 已停手, meetingNoticed }
   const codeagentState = new Map();
   const caState = id => {
@@ -155,35 +161,52 @@ function createSoftCompactController(deps = {}) {
     if (!mode) return null;
     // AI 按额度提醒留了「压完继续」的标记，但换号计划已撤销（额度重置、Hub 重启等）：不压缩，
     // 补发一次「接着做」，免得长任务停在原地。每个计划最多一次（quotaSkipped 只回一次 true），不会来回循环。
-    const skipped = async reason => {
+    // 「压完继续」没压（未达门槛 / 刚压过）时：额度计划撤销 → 发额度提示；否则补发一次「未达门槛、直接继续」（每个压缩事件一次）。
+    const skipped = async (reason, { belowThreshold = false } = {}) => {
       logger.log(`[soft-compact] ${short(sessionId)} ${reason}`);
-      let resume = false;
+      let resume = false, prompt = SKIP_CONTINUE_PROMPT, why = '额度情况已变化，这次不压缩也不换号';
       if (mode === 'continue') { try { resume = await quotaSkipped(sessionId); } catch {} }
+      // 同一个压缩事件里不管哪种补发（额度计划撤销 / 未达门槛）都只发一次。
+      const epoch = compactEpoch.get(sessionId) || 0;
+      if (!resume && mode === 'continue' && belowThreshold) {
+        if (belowSent.has(sessionId) && belowSent.get(sessionId) === epoch) { logger.log(`[soft-compact] ${short(sessionId)} below-threshold continue skipped: already sent since last compaction`); return null; }
+        resume = true; prompt = BELOW_THRESHOLD_CONTINUE_PROMPT; why = '上下文还没到压缩门槛，这次不压缩';
+      }
       if (!resume) return null;
+      belowSent.set(sessionId, epoch);
       await new Promise(resolve => setTimeout(resolve, settleMs));
-      if (isBusy(sessionId, stoppedAt)) return null;
+      if (isBusy(sessionId, stoppedAt)) { logger.log(`[soft-compact] ${short(sessionId)} continue skipped: new turn already running`); return null; }
+      // 统一认领（P2 返工 1 口径）：被挡不算已续，等对方租约到期再看。
       const skipLease = await claimOrWait(sessionId);
-      if (skipLease.continuedBy) { notice(sessionId, `额度情况已变化，这次不压缩；${skipLease.continuedBy}已让 AI 接着做。`); return null; }
-      if (!skipLease.ok) { notice(sessionId, `额度情况已变化，这次不压缩；${skipLease.label}一直占着这个会话，没有自动继续，请看一下会话。`, 'warning'); return null; }
+      if (skipLease.continuedBy) {
+        logger.log(`[soft-compact] ${short(sessionId)} continue skipped: continued by ${skipLease.continuedBy}`);
+        notice(sessionId, `${why}；${skipLease.continuedBy}已让 AI 接着做。`); return null;
+      }
+      if (!skipLease.ok) {
+        logger.log(`[soft-compact] ${short(sessionId)} continue skipped: lease held by ${skipLease.label}`);
+        notice(sessionId, `${why}；${skipLease.label}一直占着这个会话，没有自动继续，请看一下会话。`, 'warning'); return null;
+      }
       try {
-        const receipt = await sendToPty(sessionId, SKIP_CONTINUE_PROMPT, session.kind, {
+        const receipt = await sendToPty(sessionId, prompt, session.kind, {
           requireReady: false, clientSubmissionId: `soft-compact-skip-${now()}`,
         });
-        if (receipt && receipt.notSent) { skipLease.release(); throw new Error(receipt.message || receipt.error || '没发出去'); }
-        notice(sessionId, '额度情况已变化，这次不压缩也不换号，已让 AI 读进展卡接着做。');
+        if (receipt && receipt.notSent) { skipLease.release(); throw Object.assign(new Error(receipt.message || receipt.error || '没发出去'), { released: true }); }
+        logger.log(`[soft-compact] ${short(sessionId)} continue sent (${prompt === BELOW_THRESHOLD_CONTINUE_PROMPT ? 'below-threshold' : 'quota-skipped'})`);
+        notice(sessionId, `${why}，已让 AI 读进展卡接着做。`);
       } catch (error) {
-        if (error && error.notSent) skipLease.release();
-        notice(sessionId, `额度情况已变化，自动继续发送失败：${error.message}。请手动发「继续」。`, 'warning');
+        if (error && error.notSent && !error.released) skipLease.release();
+        logger.log(`[soft-compact] ${short(sessionId)} continue send failed: ${error.message}`);
+        notice(sessionId, `${why}，自动继续发送失败：${error.message}。请手动发「继续」。`, 'warning');
       }
       return null;
     };
-    if (now() - (lastDone.get(sessionId) || -Infinity) < cooldownMs) return skipped('skipped: compacted within cooldown');
+    if (now() - (lastDone.get(sessionId) || -Infinity) < cooldownMs) return skipped('skipped: compacted within cooldown', { belowThreshold: true });
     let plan = null;
     try { plan = quotaPlan(sessionId); } catch {}
     const threshold = plan ? Math.min(minTokens, plan.minTokens) : minTokens;
     let tokens = null;
     if (transcriptPath) { try { tokens = await readContextTokens(transcriptPath); } catch {} }
-    if (tokens == null || tokens < threshold) return skipped(`marker ignored: context ${tokens ?? 'unknown'} < ${threshold}`);
+    if (tokens == null || tokens < threshold) return skipped(`marker ignored: context ${tokens ?? 'unknown'} < ${threshold}`, { belowThreshold: true });
     if (session.meetingId) {
       notice(sessionId, '群聊成员不自动压缩，上下文到 80 万时由 Claude Code 自动压缩。');
       return null;
@@ -326,6 +349,7 @@ function createSoftCompactController(deps = {}) {
   }
 
   async function onCompactEnd(sessionId) {
+    compactEpoch.set(sessionId, (compactEpoch.get(sessionId) || 0) + 1); // 任何来源的压缩结束都算新的压缩事件
     const entry = compacting.get(sessionId);
     if (!entry) return;
     // CodeAgent 由 onCodeAgentStop 的复查收尾，这里只记下「收到压缩结束」。
@@ -377,4 +401,21 @@ function createSoftCompactController(deps = {}) {
   return { start, onStop, onCompactEnd, forget, isCompacting: id => compacting.has(id) };
 }
 
-module.exports = { createSoftCompactController, turnStartedSince, findMarker, readClaudeContextTokens, countCompactHints, CONTINUE_PROMPT, SKIP_CONTINUE_PROMPT, CODEAGENT_SOFT_PCT };
+// console + 追加写文件（[soft-compact] 跳过 / 补发原因事后可查）。写盘失败不影响主流程。
+function diskLogger(file, { maxBytes = 1024 * 1024, base = console } = {}) {
+  const fsMod = require('fs'), pathMod = require('path');
+  const write = (level, args) => {
+    try {
+      fsMod.mkdirSync(pathMod.dirname(file), { recursive: true });
+      try { if (fsMod.statSync(file).size > maxBytes) fsMod.renameSync(file, file + '.1'); } catch {}
+      fsMod.appendFileSync(file, `${new Date().toISOString()} ${level} ${args.map(a => (a instanceof Error ? a.message : typeof a === 'string' ? a : JSON.stringify(a))).join(' ')}\n`);
+    } catch {}
+  };
+  return {
+    log: (...args) => { base.log(...args); write('info', args); },
+    warn: (...args) => { base.warn(...args); write('warn', args); },
+    error: (...args) => { base.error(...args); write('error', args); },
+  };
+}
+
+module.exports = { diskLogger, createSoftCompactController, turnStartedSince, findMarker, readClaudeContextTokens, countCompactHints, CONTINUE_PROMPT, SKIP_CONTINUE_PROMPT, BELOW_THRESHOLD_CONTINUE_PROMPT, CODEAGENT_SOFT_PCT };

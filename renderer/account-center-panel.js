@@ -103,13 +103,13 @@ function createAccountCenterPanel({ document, ipcRenderer, escapeHtml: esc, conf
     if (busy || edit?.mode !== 'agy-bind' || edit.profileId !== profileId) return;
     const exit = edit.exit || agyExits?.routes?.find(r => r.selectable)?.id;
     if (!exit) return;
-    busy = 'agy-bind'; notice = '正在核对专线出口、在出口所在 VPS 上新建远程浏览器（约 1–2 分钟）…'; renderStatus();
+    busy = 'agy-bind'; notice = '正在核对这条专线的出口 IP（约 10 秒）…'; renderStatus();
     const ticket = epoch;
     try {
       const r = await ipcRenderer.invoke('accounts:antigravity-bind-exit', { profileId, exit });
       if (!r?.ok) throw Error(r?.error || '绑定未完成');
       if (ticket !== epoch) return;
-      accountEdit = null; notice = '已绑定专线 ' + r.profile.ip + '，远程浏览器 ' + r.profile.loginEnv + ' 已建好；点「授权」在远程窗口里登录 Google。';
+      accountEdit = null; notice = '已绑定专线 ' + r.profile.ip + '；点「授权」会打开这个账号的本机专用浏览器（只走这条专线）登录 Google。';
       await refreshAgyExits(); await refresh();
     } catch (e) { if (ticket === epoch) editAccount({ ...edit, error: e.message }); }
     finally { busy = ''; if (ticket === epoch) renderStatus(); }
@@ -474,7 +474,7 @@ function createAccountCenterPanel({ document, ipcRenderer, escapeHtml: esc, conf
       const exit = edit.mode === 'add' && edit.kind === 'codex' ? { exit: edit.exit || 'shared' }
         : edit.mode === 'add' && edit.kind === 'gemini' && agyExit ? { exit: agyExit }
         : edit.mode === 'add' && edit.kind === 'claude' && vps?.routes ? { route: edit.route || vps.routes.find(r => r.runnable)?.id, loginEnv: edit.loginEnv || 'new' } : {};
-      if (exit.route || (exit.exit && exit.exit !== 'shared')) { notice = '正在出口所在 VPS 上新建远程浏览器并核对出口（约 1–2 分钟）…'; renderStatus(); }
+      if (exit.route || (exit.exit && exit.exit !== 'shared')) { notice = edit.kind === 'gemini' ? '正在核对这条专线的出口 IP（约 10 秒）…' : '正在出口所在 VPS 上新建远程浏览器并核对出口（约 1–2 分钟）…'; renderStatus(); }
       const r = await ipcRenderer.invoke(channel, { kind: edit.kind, profileId: edit.profileId, label: edit.value, ...exit });
       if (!r?.ok) throw Error(r?.error || '账号操作未完成');
       if (ticket !== epoch) return;

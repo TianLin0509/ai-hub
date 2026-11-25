@@ -1,7 +1,7 @@
 'use strict';
 // 纯净版不带 CodeAgent 适配：这是同名空实现，只为让共用代码里的引用照常加载；纯净版没有 CodeAgent 会话，这些函数不会真正被用到。
 const accountModels = () => [];
-const personalModelsFile = () => [];
+const personalModelsFile = () => ''; // 与真实现同类型（路径字符串）
 const probeCwd = () => null;
 const localCandidates = () => [];
 const importLocal = async () => null;

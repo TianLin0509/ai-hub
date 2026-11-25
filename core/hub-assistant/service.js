@@ -594,6 +594,7 @@ class AssistantService {
       if(session.id!==id||session.purpose!=='hub-assistant'||session.kind!==kind)throw new Error('助理返回的会话编号或后端与预留身份不一致，需核对创建结果');
       await this.connectBridge();backends.activate(this.store,kind,id);
       await this.applyProfile(kind,id);
+      if(kind==='claude'){const m=this.sessionMetadata(id);if(m?.claudeProfile)this.store.set('frontAccount',{id:m.claudeProfile,label:m.claudeProfileLabel||m.claudeProfile,at:Date.now()});}
       return{ok:true,sessionId:id,backendKind:kind,session:this.deps.getSession(id)||session};
     };
     const started=Date.now(),timed=async(how,session,id)=>{const launchMs=Date.now()-started,result=await finish(session,id);this._cold={at:started,how};this.timing({step:'ensure',how,kind,trigger:this._ensureTrigger||'use',launchMs,totalMs:Date.now()-started});return result;};
@@ -605,7 +606,17 @@ class AssistantService {
         try{const rotated=await this.rotate(kind,old,{reason:'lean'});if(rotated)return rotated;}finally{this._leanRotating=false;}
       }
       // A reserved launch can have succeeded even when its receipt was lost.
-      if(this.deps.resumeSession){const want=this.store.get('profilePending:'+kind)&&this.store.get('profile:'+kind);const session=await this.deps.resumeSession(old,this.getLaunchOptions(kind,old),want?{model:want.model,effort:want.effort||null}:undefined);if(session)return timed('resume',session,old);}
+      if(this.deps.resumeSession){
+        const want=this.store.get('profilePending:'+kind)&&this.store.get('profile:'+kind),base=want?{model:want.model,effort:want.effort||null}:null;
+        // 前台换号（2026-11-25）：旧前台建时没开独立账号目录，换号入口一直灰着。恢复时顺带升级成可换号会话（同一对话原样接上）；
+        // 升级没成就按原样恢复，前台照常可用，只是暂时还不能换号。
+        const upgrade=this.frontNeedsAccountUpgrade(kind,old);
+        if(upgrade){
+          try{const session=await this.deps.resumeSession(old,this.getLaunchOptions(kind,old),{...base,claudeAutoSwitch:true});if(session){console.log('[assistant] front account upgraded on resume',old);return timed('resume',session,old);}}
+          catch(error){console.warn('[assistant] front account upgrade on resume failed, resuming as before',error.message);}
+        }
+        const session=await this.deps.resumeSession(old,this.getLaunchOptions(kind,old),base||undefined);if(session)return timed('resume',session,old);
+      }
       const pending=(this.store.get('backendCreation:'+kind)||this.store.get('assistantCreation'))?.state==='reserved';
       return{ok:false,sessionId:old,needsReconciliation:pending,error:pending?'上次助理创建结果未确认；已保留原编号，需核对该实体后恢复。':'助理原会话未打开，请从历史恢复该会话。'};
     }
@@ -614,11 +625,75 @@ class AssistantService {
     const id=randomUUID();backends.reserve(this.store,kind,id);
     await this.connectBridge();
     this.store.set('profilePending:'+kind,false);
-    const session=await this.deps.createSession(kind,{...defaults,id,title:'AI Hub 助理 · '+backends.getKindLabel(kind),name:'AI Hub 助理',purpose:'hub-assistant',...this.getLaunchOptions(kind,id)});
+    const session=await this.deps.createSession(kind,{...defaults,...(kind==='claude'?this.frontAccountLaunch():{}),id,title:'AI Hub 助理 · '+backends.getKindLabel(kind),name:'AI Hub 助理',purpose:'hub-assistant',...this.getLaunchOptions(kind,id)});
     if(kind==='claude')this.store.set('frontLean:'+kind,id);
     return timed('create',session,id);
   }
   getLaunchOptions(kind,id){return backends.launchOptions(this,backends.backendKind(kind),id);}
+  // 根因：前台建会话时没要独立账号目录（claudeAccountSwitchable），Hub 的换号机制把它当「旧会话」，下拉全灰。
+  // 做法：前台和普通 Claude 会话共用同一套换号（main/claude-account-switch.js）：手动下拉换号、额度用完自动换号、账号标记置灰。
+  frontNeedsAccountUpgrade(kind,id){
+    if(kind!=='claude'||!id||this.deps.claudeAccountSwitchReady?.()!==true)return false;
+    const meta=this.sessionMetadata(id);
+    return !!meta&&/^claude(?:-resume)?$/.test(meta.kind||'')&&!meta.claudeRuntimeHome;
+  }
+  // 新开前台（换班、换后端回来）：沿用上一任前台当前的号和自动换号开关，不回落到 Hub 默认号。
+  frontAccountLaunch(){
+    if(this.deps.claudeAccountSwitchReady?.()!==true)return{}; // 只有一个号（分享版、新装）或走 API：没号可换，照旧启动
+    const opts={claudeAccountSwitchable:true,claudeAutoSwitch:true};
+    const prev=[...(this.store.get('retiredAssistants')||[])].reverse().find(r=>r.kind==='claude');
+    const meta=prev&&this.sessionMetadata(prev.id);
+    // 上一任的号能用就沿用（含我的账号）；被标记了就按 Hub 推荐顺序挑一个没标记的号，不回落到可能同样被标记的默认号。
+    if(meta?.claudeProfile&&!this.deps.accountBlocked?.(meta.claudeProfile))opts.claudeProfile=meta.claudeProfile;
+    else{let pick=null;try{pick=this.deps.claudeAccountStatus?.()?.recommendedId||null;}catch{}if(pick&&!this.deps.accountBlocked?.(pick))opts.claudeProfile=pick;}
+    if(typeof meta?.claudeAutoSwitch==='boolean')opts.claudeAutoSwitch=meta.claudeAutoSwitch;
+    return opts;
+  }
+  // 在线把前台升级成可换号会话：空闲时按原对话重开一次（同一原生记录、守则与记忆照旧注入）；忙时不动，明说原因。
+  makeFrontSwitchable(id){
+    // 同一时刻只升级一次：并发的请求共用同一个结果，不重复重开。
+    if(this._frontUpgrade)return this._frontUpgrade;
+    this._frontUpgrade=this._makeFrontSwitchable(id).finally(()=>{this._frontUpgrade=null;});
+    return this._frontUpgrade;
+  }
+  async _makeFrontSwitchable(id){
+    const kind=this.activeKind(),bound=backends.bindings(this.store)[kind];
+    if(id!==bound)return{ok:false,message:'不是当前前台会话'};
+    if(!this.frontNeedsAccountUpgrade(kind,id))return{ok:true,status:'ready'};
+    const busyNow=()=>{const s=this.deps.getSession(id);return !s||require('../session-runtime-truth').sessionRuntimeIsActive(s)||['running','waiting'].includes(s.status)||!!this.deps.hasPendingPrompt?.(id);};
+    if(!this.deps.getSession(id))return{ok:false,message:'前台还没打开，打开后再换号'};
+    if(busyNow())return{ok:false,message:'前台正在回答，这一轮结束后再换号（首次换号要把前台重开一次）'};
+    if(this.creating||this.switching)return{ok:false,message:'前台正在连接或切换，请稍候'};
+    if(!this.deps.restartSession)return{ok:false,message:'重开服务未就绪'};
+    // 登录核验是异步的：真正停进程前再查一次，期间来了新消息或前台换了人就不重开（guard 由重开入口在停进程前调用）。
+    const guard=({allowSuspended=false}={})=>backends.bindings(this.store)[kind]===id&&!this.creating&&!this.switching&&(allowSuspended||!busyNow());
+    const result=await this.deps.restartSession(id,{claudeAutoSwitch:true},{guard});
+    if(result?.notSwitched)return{ok:false,message:'前台刚收到新消息，这一轮结束后再换号；原会话和对话保留'};
+    if(!result||result.ok===false)return{ok:false,message:'前台升级为可换号会话失败：'+(result?.message||'原因未知')+'；原会话和对话保留'};
+    console.log('[assistant] front account upgraded live',id);
+    return{ok:true,status:'upgraded'};
+  }
+  noteAccountSwitch(id,status,message){
+    if(id!==this.store.get('sessionId'))return null;
+    const meta=this.sessionMetadata(id)||{},label=meta.claudeProfileLabel||meta.claudeProfile||'';
+    const prev=this.store.get('frontAccount')||null;
+    const notify=['manual-switched','switched','continued','waiting','manual-failed','attention'].includes(status);
+    if(!notify){if(!prev&&meta.claudeProfile&&['checking','manual-switching'].includes(status))this.store.set('frontAccount',{id:meta.claudeProfile,label,at:Date.now()});return null;}
+    const changed=!!meta.claudeProfile&&prev?.id&&prev.id!==meta.claudeProfile;
+    if(meta.claudeProfile)this.store.set('frontAccount',{id:meta.claudeProfile,label,at:Date.now()});
+    // 成功类：号没变（同一次切换的后续状态）不重复记。失败类：同一句 10 分钟内只记一次。
+    if(['manual-switched','switched','continued'].includes(status)&&!changed)return null;
+    const key=status+'|'+message,last=this._accountNote;
+    if(!changed&&last?.key===key&&Date.now()-last.at<600000)return null;
+    this._accountNote={key,at:Date.now()};
+    const from=changed?(prev.label||prev.id):'';
+    const text=!changed?(status==='waiting'?`前台额度用完了，但没有可换的号：${message}`:`前台换号没成功（仍用${label}）：${message}`)
+      :status==='attention'?`前台账号已从${from}换到${label}，但后续没完成：${message}。请打开前台核对。`
+      :`前台账号已从${from}换到${label}（${status==='manual-switched'?'手动':'额度用完，自动'}）。${status==='continued'?'被额度打断的那一轮已让它接着做。':''}对话、守则、记忆和待决策/提醒/备忘都保留。`;
+    const row=this.logDialog({id:'front-account:'+Date.now(),role:'system',lane:'notice',by:'前台换号',text});
+    try{this.deps.onAssistantNotification?.({id:'front-account-'+Date.now(),kind:'front-account',title:'前台换号',text,at:Date.now()});}catch(error){console.warn('[assistant] front account notice',error.message);}
+    return row;
+  }
   async connectBridge(){await this.bridge.start();const temporary=this.endpointFile+'.'+process.pid+'.tmp';fs.writeFileSync(temporary,JSON.stringify({url:this.bridge.url,token:this.bridge.secret}),{mode:0o600});require('./atomic-rename').renameRetry(temporary,this.endpointFile);}
   getMcpEntry(sessionId=this.store.get('sessionId')){return{name:'hub_assistant',command:this.deps.nodeExecutable||'node',args:[path.resolve(__dirname,'../../scripts/assistant-mcp.js')],env:{HUB_ASSISTANT_ENDPOINT_FILE:this.endpointFile,HUB_ASSISTANT_SESSION_ID:sessionId||'',...(this.deps.runAsNode?{ELECTRON_RUN_AS_NODE:'1'}:{})},toolApprovalModes:{list_sessions:'approve',read_progress:'approve',update_front_rules:'approve',history_context:'approve',claim_session:'approve',watch_session:'approve',send_session:'approve',create_session:'approve',dispatch_to_assistant:'approve',update_memory:'approve',account_status:'approve',dispatch_candidates:'approve'},toolOutputTokenLimits:{history_context:8000}};}
   isAssistantSession(sessionId){return isAssistantSession(this.store,sessionId,this.deps.getSession(sessionId));}

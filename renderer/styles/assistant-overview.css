@@ -152,3 +152,8 @@
 .ov-tl.warn{color:var(--ov-red)}
 .ov-tw{text-align:right;color:var(--ov-ink3);font-size:12.5px;white-space:nowrap}
 .ov-tfoot{flex:none;display:flex;align-items:center;justify-content:space-between;padding:8px 4px 0}
+
+/* 自动续跑 P2：熔断提示一行、连续 3 次没产出标红 */
+.ov-ar-breaker { margin: 0 0 6px; padding: 4px 8px; border-radius: 6px; background: #fdecea; color: #b42318; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-li.ov-li-stop { border-left: 3px solid #d92d20; background: #fff5f4; }
+.ov-ar-switch .ov-mode + .ov-mode { margin-left: 4px; }

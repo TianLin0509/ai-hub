@@ -141,6 +141,7 @@ function applyProfileEnv(env, profile) {
   if (pinned) Object.assign(out, {AI_HUB_ANTIGRAVITY_PROXY:pinned.proxy, HTTP_PROXY:pinned.proxy, HTTPS_PROXY:pinned.proxy,
     ALL_PROXY:pinned.proxy, http_proxy:pinned.proxy, https_proxy:pinned.proxy, all_proxy:pinned.proxy,
     NO_PROXY:'localhost,127.0.0.1', no_proxy:'localhost,127.0.0.1'});
+  if (pinned) try { const b = require('./antigravity-exit-bridge'), e = b.entryForProxy(pinned.proxy); if (e) b.ensureSoon(e); } catch {}
   // CLAUDE_HUB_HOME_DIR is an existing test guard; never manufacture it in production.
   assertProfileEnv(out);
   return out;

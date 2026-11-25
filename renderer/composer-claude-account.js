@@ -44,7 +44,7 @@ function mountClaudeAccountChip({ document: doc, tuningControls, sessionId, getS
     const status = session?.claudeSwitchStatus;
     const pending = status?.status === 'manual-queued' ? status.targetProfile : pendingProfile;
     // 平时不写说明（标题行已写「工作中会等本轮结束再换」）；排队、失败、不能换号、当前号风控时才显示。
-    const noteText = feedback?.message || (!options?.canSwitch && options?.reason) || status?.message || options?.reason
+    const noteText = feedback?.message || (!options?.canSwitch && options?.reason) || status?.message || options?.reason || options?.note
       || (accountRisk.riskShown('claude', session?.claudeProfile) ? '当前账号风控观察中：尽量少用，新任务建议用其他账号新建会话。' : '');
     paintAccountMenu({ document: doc, menu, kind: 'claude', state: {
       accounts: options?.accounts || null, currentId: session?.claudeProfile, pendingId: pending,
@@ -140,7 +140,7 @@ function mountClaudeAccountChip({ document: doc, tuningControls, sessionId, getS
       || (profileId !== session.claudeProfile && account.available !== true)) return;
     const startedRevision = revision;
     inFlight = true;
-    feedback = { state: 'pending', message: '正在申请切换账号…' };
+    feedback = { state: 'pending', message: options.upgradeFirst ? '先把前台按原对话重开一次，再切换账号…' : '正在申请切换账号…' };
     paintMenu();
     try {
       const result = await ipcRenderer.invoke('session:set-claude-account', { sessionId, profileId });

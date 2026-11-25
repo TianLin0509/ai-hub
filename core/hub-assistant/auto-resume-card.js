@@ -25,12 +25,13 @@ function cardText(card) {
   if (t.retrying) parts.push(`重试中 ${t.retrying}`);
   if (card.trigger === 'hub-restart') return `Hub 重启后自动续跑检查了 ${rows.length} 个会话：${parts.join('、')}`;
   const row = rows[0];
+  if (card.trigger === 'patrol' && row && (row.by === 'patrol-auto' || row.by === 'quota-resume')) return `「${row.title}」${row.reason}`;
   if (card.trigger === 'patrol') return row ? `「${row.title}」巡逻提醒后续跑：${ACTION_LABEL[row.action] || row.action}${row.action === 'resumed' ? '' : `（${row.reason}）`}` : '巡逻提醒后续跑';
   return row ? `「${row.title}」CLI 进程重开：${ACTION_LABEL[row.action] || row.action}${row.action === 'resumed' ? '' : `（${row.reason}）`}` : 'CLI 进程重开';
 }
 
 class AutoResumeCards {
-  // patrol（P1 巡逻器，主进程挂上）：{ list(), dismiss(sid), resume(sid), enabled(), setEnabled(on) }。
+  // patrol（P1 巡逻器，主进程挂上）：{ list(), dismiss(sid), resume(sid), enabled(), setEnabled(on), mode(), setMode(m), breakers() }。
   constructor(assistant, { now = Date.now } = {}) { this.a = assistant; this.now = now; this.cards = new Map(); this.resumer = null; this.patrol = null; this.busy = new Map(); }
 
   all() {
@@ -69,9 +70,17 @@ class AutoResumeCards {
     return this.all().filter(c => (c.updatedAt || c.at || 0) >= since).sort((a, b) => (b.updatedAt || b.at || 0) - (a.updatedAt || a.at || 0));
   }
 
-  async act({ id, action, sessionId, enabled } = {}) {
+  async act({ id, action, sessionId, enabled, mode } = {}) {
     const p = this.patrol;
-    if (action === 'list') return { ok: true, cards: this.list(), stalled: p ? p.list() : [], enabled: p ? !!p.enabled() : true };
+    // mode：'off' 关 / 'remind' 只提醒 / 'auto' 自动续故障类（三档开关）。
+    const state = () => ({ enabled: p ? !!p.enabled() : true, mode: p ? (p.enabled() ? (p.mode?.() === 'auto' ? 'auto' : 'remind') : 'off') : 'remind', breakers: p?.breakers ? p.breakers() : [] });
+    if (action === 'list') return { ok: true, cards: this.list(), stalled: p ? p.list() : [], ...state() };
+    if (action === 'set-mode') {
+      if (!p) throw new Error('巡逻器尚未就绪');
+      if (!['off', 'remind', 'auto'].includes(mode)) throw new Error('未知档位');
+      await p.setMode(mode);
+      return { ok: true, ...state() };
+    }
     // 巡逻提醒：忽略（这一回合不再提醒）/ 续跑（走按钮路径）/ 总开关。
     if (action === 'patrol-dismiss') { if (!p) throw new Error('巡逻器尚未就绪'); return { ok: !!p.dismiss(sessionId), stalled: p.list() }; }
     if (action === 'patrol-resume') {

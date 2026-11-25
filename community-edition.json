@@ -37,8 +37,8 @@
     "AI Hub 纯净版：多 AI 会话、群聊与账号管理，使用你自己的 AI 账号。",
     "带前台助理（中性默认人设与通用规则，可自行修改）与 hub 命令组队；随包附 hub-driver skill。"
   ],
-  "version": "1.0.0",
-  "upstreamVersion": "1.6.986",
-  "upstreamCommit": "0a453601ce310dcb7849091533abb3e4da0835f9",
+  "version": "1.0.1",
+  "upstreamVersion": "1.6.990",
+  "upstreamCommit": "499723a1b8b4b4a2902b5adcfa89eb391e5c5bd0",
   "upstreamDirty": false
 }
