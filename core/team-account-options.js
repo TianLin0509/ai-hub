@@ -7,7 +7,9 @@ function teamAccountOptions({ usage = {}, ranking = {}, codexProfiles = [], anti
   const flaggedClaude=new Map();
   for(const a of usage.claude||[]){const why=isFlagged('claude',a.profileId);if(why)flaggedClaude.set(a.profileId,typeof why==='string'?why:'风控观察中');}
   const pick=accountStatus({accounts:usage.claude||[],sessions,flagged:flaggedClaude});
-  const claude = { recommendedId: pick.recommendedId, order:pick.order, reason:pick.reason, rows:pick.rows.map(r=>({...r,
+  // no：右侧栏的固定序号（core/account-seq.js），点名「账号N」与回执都按它认。
+  const claudeSeq=new Map((usage.claude||[]).map(a=>[a.profileId,Number(a.seq)||null]));
+  const claude = { recommendedId: pick.recommendedId, order:pick.order, reason:pick.reason, rows:pick.rows.map(r=>({...r,no:claudeSeq.get(r.id)||null,
     plenty:r.planMultiplier===1&&r.spare5h>50&&r.spare7d>30,usable:!r.excluded,
     flagged:flaggedClaude.get(r.id)||false})) };
   const spare = window => {
@@ -18,7 +20,7 @@ function teamAccountOptions({ usage = {}, ranking = {}, codexProfiles = [], anti
   const codexUsage = new Map((usage.codex || []).map(a => [a.profileId, a]));
   const codex = { rows: codexProfiles.map(p => {
     const row = codexUsage.get(p.id);
-    return { id: p.id, label: p.label || row?.profileLabel || p.id,
+    return { id: p.id, label: p.label || row?.profileLabel || p.id, no: Number(row?.seq) || null,
       spare5h: spare(row?.usage5h), spare7d: spare(row?.usage7d),
       activeSessions: sessions.filter(s => /^codex(?:-resume)?$/.test(s.kind) && s.codexProfile === p.id
         && !['dormant', 'exited', 'closed'].includes(s.status)).length,
@@ -34,7 +36,7 @@ function teamAccountOptions({ usage = {}, ranking = {}, codexProfiles = [], anti
       const w5h = gemGroup?.usage5h || row?.usage5h || null;
       const w7d = gemGroup?.usage7d || row?.usage7d || null;
       return {
-        id: p.id, label: p.label || row?.profileLabel || p.id, no: i + 1,
+        id: p.id, label: p.label || row?.profileLabel || p.id, no: Number(row?.seq) || i + 1,
         spare5h: spare(w5h), spare7d: spare(w7d),
         thirdPartySpare5h: spare(tpGroup?.usage5h), thirdPartySpare7d: spare(tpGroup?.usage7d),
         activeSessions: sessions.filter(s => /^gemini(?:-resume)?$/.test(s.kind) && (s.antigravityProfile || 'default') === p.id

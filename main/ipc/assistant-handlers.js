@@ -5,6 +5,8 @@ function registerAssistantIpc(ipcMain,deps){
   const service=new AssistantService(deps);
   ipcMain.on('assistant:session-view',(_event,packet)=>service.setSessionViews(packet));
   // 助理页右栏额度表算好的精简读数，给手机等「前台客户端」的状态行用（见 core/hub-assistant/front-client.js）。
+  ipcMain.on('focus-session',(_event,p)=>{if(p&&typeof p.sessionId==='string'&&p.sessionId)service.noteViewed(p.sessionId);});
+  ipcMain.on('mark-sessions-read',(_event,p)=>{if(Array.isArray(p?.sessionIds))service.noteViewed(p.sessionIds);});
   ipcMain.on('assistant:quota-view',(_event,rows)=>service.frontClient.setQuotaView(rows));
   for(const [name,handler] of Object.entries({
     'session-cards':request=>service.sessionCards(request),
@@ -12,7 +14,7 @@ function registerAssistantIpc(ipcMain,deps){
     'workbench-context':request=>({ok:true,text:service.workbench.context(request)}),
     'workbench-action':request=>service.workbench.action(request),
     // 当前概览弹窗（2026-11-25）：两个 Tab 的数据与弹窗内直接回复。
-    'overview-board':()=>service.overviewBoard(),'overview-reply':request=>service.overviewReply(request),'overview-skip':request=>service.overviewSkip(request),
+    'overview-board':()=>service.overviewBoard(),'overview-reply':request=>service.overviewReply(request),'overview-skip':request=>service.overviewSkip(request),'overview-read':request=>service.overviewRead(request),
     'get-overview':()=>service.overview(),status:()=>service.overview(),
     // 侧栏只要「前台是哪个会话」，不必每 15 秒拿整份总览（生产实测约 0.38 MB、0.3 秒，2026-11-18）。
     'front-binding':()=>({ok:true,sessionId:service.store.get('sessionId')||null}),

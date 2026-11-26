@@ -132,6 +132,8 @@ class HubAccounts {
         : valid && seen.state === 'signed_in' && this.now() - seen.observedAt < 300000 ? 'signed_in' : cli.state;
       return { ...cli, state, identity: this.owner(cli, identities) };
     });
+    // 新建 Claude 账号的默认名「账号N」跟固定序号走（core/account-seq.js，2026-11-26）：删掉的号的数字不再发给新号。
+    try { const st = require('./account-seq').sharedSeq(); if (st.load().providers.claude) { const n = st.next('claude'); for (const c of clis) if (c.kind === 'claude') c.nextSeq = n; } } catch {}
     let network;try{network=this.chrome.routingStatus?.();}catch(e){network={state:'invalid',message:e.message};}
     return { chrome: { running, loginOpen: passive ? null : !running && this.chrome.profileHeld(), root: this.chrome.root, network }, identities, clis, preferences,
       tools: require('./hub-browser-tool').integrationStatus(this.chrome.root), checkedAt: cache.checkedAt || 0 };

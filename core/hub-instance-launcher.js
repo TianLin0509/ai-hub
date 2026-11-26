@@ -10,7 +10,7 @@ function buildHubInstanceEnv(baseEnv) {
   const env = { ...baseEnv };
   const parentKeys = new Set([
     'ELECTRON_RUN_AS_NODE', 'CLAUDECODE', 'CLAUDE_HUB_PORT', 'CLAUDE_HUB_TOKEN',
-    'CLAUDE_HUB_SESSION_ID', 'AI_TEAM_HUB_CALLBACK_URL', 'CODEX_THREAD_ID', 'CODEX_SESSION_ID',
+    'CLAUDE_HUB_SESSION_ID', 'AI_HUB_SESSION_ID', 'AI_TEAM_HUB_CALLBACK_URL', 'CODEX_THREAD_ID', 'CODEX_SESSION_ID',
   ]);
   for (const key of Object.keys(env)) {
     const upper = key.toUpperCase();

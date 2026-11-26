@@ -79,6 +79,8 @@ function createHubRulesStore(options = {}) {
   const builtinFile = options.builtinFile || BUILTIN.file;
   const loadPersonal = options.loadPersonal || (() => require('./agent-user-context').loadUserContext(env, dataDir));
   const runSync = options.runSync || defaultRunSync;
+  // 组队指路（core/team-guide.js）：不受规则页开关影响，有 hub 命令的版本都带。
+  const teamGuide = options.teamGuide || (() => null);
   let checking = null;
 
   // 内置文件经 git 检出可能变成 CRLF；服务器统一存 LF、去 BOM。按同一口径算校验值，同一版才认得出来。
@@ -274,6 +276,9 @@ function createHubRulesStore(options = {}) {
       const mine = readMine().trim();
       if (mine) parts.push({ label: '我的规则', content: mine });
     }
+    let guide = null;
+    try { guide = teamGuide(); } catch (_) { /* 指路拿不到就不带，不影响规则 */ }
+    if (guide) parts.push({ label: '组队指路', content: String(guide).trim() });
     if (!parts.length) return null;
     const content = parts.map(p => `【${p.label}】\n${p.content}`).join('\n\n');
     return { content, label: parts.map(p => p.label).join(' + '), version: sha256(content) };

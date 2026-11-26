@@ -2,13 +2,13 @@
 
 把你自己的 Claude Code、Codex、Gemini CLI、Kimi 等 AI 放进一个 Windows 桌面工作台：单独对话、多 AI 群聊、开发分工看板、历史检索、文件预览、记忆文件库与能力管理。
 
-这是 AI Hub 的公开发行版，当前 **v1.0.1**，同步自上游 **1.6.990**（具体提交见 `community-edition.json`）。它不附带任何人的账号、聊天记录、私人模块或私人服务。MIT 开源；AI 服务的账号、订阅和用量由你自己提供。
+这是 AI Hub 的公开发行版，当前 **v1.0.2**，同步自上游 **1.6.1001**（具体提交见 `community-edition.json`）。它不附带任何人的账号、聊天记录、私人模块或私人服务。MIT 开源；AI 服务的账号、订阅和用量由你自己提供。
 
 ## 最省事：让你的 AI 编码助手代装
 
 把下面这段话原样发给你正在用的 Agent（Claude Code、Codex、Cursor 等都可以），它会读完本仓库的说明后替你装好、配好、验收：
 
-> 请安装 https://github.com/TianLin0509/ai-hub 的 v1.0.1。先读 AGENTS.md 和 docs/AGENT-QUICKSTART.md，走免 Node/Git/Python 的便携安装路线，校验下载并保留本机已有的 Hub 和 CLI。复用已有 CLI，缺少时问我要用哪家再补装。打开官方登录让我本人授权，不读取或索取密钥。确认首页检测、一条真实消息和重启恢复，报告实际验证结果。如果装不上，按 docs/AGENT-QUICKSTART.md 的「装不上时的诊断报告」整理给我。
+> 请安装 https://github.com/TianLin0509/ai-hub 的 v1.0.2。先读 AGENTS.md 和 docs/AGENT-QUICKSTART.md，走免 Node/Git/Python 的便携安装路线，校验下载并保留本机已有的 Hub 和 CLI。复用已有 CLI，缺少时问我要用哪家再补装。打开官方登录让我本人授权，不读取或索取密钥。确认首页检测、一条真实消息和重启恢复，报告实际验证结果。如果装不上，按 docs/AGENT-QUICKSTART.md 的「装不上时的诊断报告」整理给我。
 
 你只需要做两件事：在弹出的官方页面里登录自己的 AI 账号；看 Agent 最后给的验收结果。
 
@@ -18,13 +18,13 @@ Windows 10/11 x64，在 PowerShell 粘贴执行。Hub 自带运行时，**不需
 
 ```powershell
 $setup = Join-Path $env:TEMP ('ai-hub-install-' + [guid]::NewGuid() + '.ps1')
-Invoke-WebRequest -UseBasicParsing 'https://github.com/TianLin0509/ai-hub/releases/download/v1.0.1/install-release.ps1' -OutFile $setup
-powershell -NoProfile -ExecutionPolicy Bypass -File $setup -Version v1.0.1
+Invoke-WebRequest -UseBasicParsing 'https://github.com/TianLin0509/ai-hub/releases/download/v1.0.2/install-release.ps1' -OutFile $setup
+powershell -NoProfile -ExecutionPolicy Bypass -File $setup -Version v1.0.2
 ```
 
 脚本下载并校验便携 ZIP，按版本安装、创建桌面入口并启动。重复执行会复用已验证的版本，旧版本和用户数据都保留。电脑上还没有 AI CLI 时，在最后一行加 `-Provider codex` 或 `-Provider claude`，脚本会调用官方原生安装器；已有 CLI 不会重复安装。**登录授权和模型使用权仍由你本人提供。**
 
-窗口标题会显示 `AI Hub v1.0.1（上游 1.6.990）`，报告问题时请带上这一行。
+窗口标题会显示 `AI Hub v1.0.2（上游 1.6.1001）`，报告问题时请带上这一行。
 
 ## 装不上怎么办
 
@@ -53,7 +53,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Launch
 - Claude / Codex 在真实终端（PTY）里运行，卡片视图与终端视图可切换；停止、审批、恢复、分支会话与会话独占。
 - 多 AI 群聊：通用讨论、开发分工、文件工作流、开发看板，以及由一位「编排员」AI 拆任务、派成员、控预算的 AI 编排模式。
 - 前台助理：一个常驻的前台会话，听懂你要做的事、派给负责人会话、转述汇报，也能记备忘、到点提醒；默认人设与通用规则都是中性的，可在「规则」页和前台守则里改成你自己的。
-- 组队：会话里可用 `hub` / `hub-team` 命令新开会话、招侧栏成员（Claude、Codex、Gemini 等）、派活与验收；随包附带 `skills/hub-driver`，复制到 `~/.claude/skills/` 后 Claude Code 会按它组队。
+- 组队：会话里可用 `hub` / `hub-team` 命令新开会话、招侧栏成员（Claude、Codex、Gemini 等）、派活与验收；随包附带的 `hub-driver` skill 启动时自动装进 `~/.agents/skills/` 与 `~/.claude/skills/`（已有同名目录不覆盖），所有后端的会话都默认知道去读它：在任何会话里说「组个队做 X」即可。
 - 语音输入（可选）：边说边出字、个人词库、按键说话；本地识别或你自己的云端语音 Key。
 - 本地历史检索、文件预览与文件管理、沉浸式阅读、工作区、记忆文件库和按需造梦。
 - 资源面板：CPU/GPU/内存/磁盘占用、进程与磁盘清理（先预览再执行）。

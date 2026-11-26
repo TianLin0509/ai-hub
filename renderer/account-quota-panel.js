@@ -79,7 +79,8 @@ function viewRows(provider, snapshot, currentProfileId, now) {
     const { w5h, w7d } = windowsOf(provider, row, now);
     const v5 = windowView(provider, w5h, now, !!row.error), v7 = windowView(provider, w7d, now, !!row.error);
     const view = {
-      provider, no: index + 1, profileId: row.profileId || '',
+      // no：建号时固定下来的序号（主进程 core/account-seq.js 给的 seq），删号后其余号不前移；老数据没有 seq 时退回位置序号。
+      provider, no: Number(row.seq) > 0 ? Number(row.seq) : index + 1, profileId: row.profileId || '',
       label: row.profileLabel || row.profileId || ('账号' + (index + 1)),
       remain5h: v5.pct, remain7d: v7.pct, reset5h: v5.at, reset7d: v7.at, assumed5h: v5.assumed, assumed7d: v7.assumed,
       has5h: provider === 'claude' || !!w5h,

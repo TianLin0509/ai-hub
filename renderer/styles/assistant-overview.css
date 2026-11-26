@@ -91,6 +91,8 @@
 .ov-g-head{display:flex;align-items:baseline;gap:12px;margin-bottom:6px}
 .ov-g-head h3{margin:0;font-size:18px}
 .ov-g-head span{font-size:12.5px;color:var(--ov-ink3)}
+.ov-g-head .ov-go{margin-left:auto}
+.ov-row-prog{color:var(--ov-ink3)}
 .ov-row{padding:11px 0;border-bottom:1px solid var(--ov-line)}
 .ov-row-top{display:flex;justify-content:space-between;align-items:center;gap:10px}
 .ov-row-line{margin-top:3px;font-size:14px}
@@ -157,3 +159,16 @@
 .ov-ar-breaker { margin: 0 0 6px; padding: 4px 8px; border-radius: 6px; background: #fdecea; color: #b42318; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ov-li.ov-li-stop { border-left: 3px solid #d92d20; background: #fff5f4; }
 .ov-ar-switch .ov-mode + .ov-mode { margin-left: 4px; }
+/* 完成待阅读（2026-11-26）：每行两层——一句话结论 + 产物路径；右侧完成时间与「已读」。 */
+.ov-tr.ov-rd{grid-template-columns:84px minmax(140px,260px) minmax(0,1fr) 78px 52px;height:62px}
+.ov-rd-mid{display:flex;flex-direction:column;min-width:0;gap:1px}
+.ov-rd-p{display:flex;align-items:center;gap:6px;min-width:0;font-size:12px;color:var(--ov-ink3)}
+.ov-rd-path{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:Consolas,"Microsoft YaHei UI",monospace;font-size:12px;color:var(--ov-acc)!important;min-width:0}
+.ov-rd-path:hover{text-decoration:underline}
+.ov-rd-p small{flex:none}
+.ov-rd-nop{color:var(--ov-ink3)}
+.ov-tr.ov-rd .ov-mode{justify-self:end;text-align:center!important}
+.ov-rd-head p{display:flex;align-items:center;gap:10px}
+.ov-rd-head .ov-rd-allbtn,.ov-rd-btns{margin-left:auto}
+.ov-rd-btns{display:inline-flex;gap:6px}
+.ov-rd-head.warn{background:var(--ov-amber-soft)}

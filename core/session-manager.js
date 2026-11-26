@@ -2296,13 +2296,22 @@ class SessionManager extends EventEmitter {
     if (isCodexRuntime) {
 
       for (const key of ['CODEX_THREAD_ID','CODEX_SESSION_ID','CLAUDE_HUB_SESSION_ID',
-        'CLAUDE_HUB_PORT','CLAUDE_HUB_TOKEN','CLAUDE_HUB_TEAM_TOKEN','AI_TEAM_HUB_CALLBACK_URL']) delete sessionEnv[key];
+        'CLAUDE_HUB_PORT','CLAUDE_HUB_TOKEN','CLAUDE_HUB_TEAM_TOKEN','AI_TEAM_HUB_CALLBACK_URL','AI_HUB_SESSION_ID']) delete sessionEnv[key];
       if (!isNativeCodex) {
         // PTY Codex 的状态与卡片绑定都靠 hook：session-hub-hook.py 只认这三个变量。
         this._applyHubSessionEnv(sessionEnv, id);
         if (process.env.CLAUDE_HUB_DATA_DIR) sessionEnv.CLAUDE_HUB_DATA_DIR = process.env.CLAUDE_HUB_DATA_DIR;
+      } else {
+        // 原生 Codex 的状态只认 App Server，所以上面删了 hook 身份（CLAUDE_HUB_SESSION_ID 一有，hook 就会把事件记到这张卡上）。
+        // hub / hub-team 命令改认 AI_HUB_SESSION_ID，hook 不认它；端口、令牌没有会话编号时 hook 也不动（2026-11-26 组队指路）。
+        this._applyHubSessionEnv(sessionEnv, id);
+        sessionEnv.AI_HUB_SESSION_ID = sessionEnv.CLAUDE_HUB_SESSION_ID;
+        delete sessionEnv.CLAUDE_HUB_SESSION_ID;
       }
     }
+    // Kimi、千问、智谱、DeepSeek ACP 也带 Hub 会话身份，终端里能调 hub / hub-team 组队（2026-11-26）。
+    // 它们没有 Hub hook，状态绑定不受影响。
+    if (isKimi || isAcp) this._applyHubSessionEnv(sessionEnv, id);
     let claudePtyLaunch = null;
     if (isClaude && isPtyAgent) {
       // 与 PTY 时代（8c5c6928）相同：spawn 前预写 projects[cwd].hasTrustDialogAccepted，

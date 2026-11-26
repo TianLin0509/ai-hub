@@ -1,3 +1,4 @@
+# 纯净版与队员版（2026-11-26 负责人 #157）：CI 只构建和验证，不在打标签时自动建 GitHub Release——发布由负责人手工上传资产，自动建会和手工建的冲突。
 name: Verify and build Windows preview
 on:
   push:
@@ -56,23 +57,3 @@ jobs:
             artifacts/community-gui
             artifacts/community-packaged-gui
             artifacts/official-codex
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: verify
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: AIHub-Windows
-          path: release
-      - name: Create checksums and publish prerelease
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          cd release
-          sha256sum --check SHA256SUMS.txt
-          gh release create "$RELEASE_TAG" --prerelease --title "AI Hub Community $RELEASE_TAG" --notes "Windows x64. Portable install needs no Node, Git or Python. Download install-release.ps1 and run it in PowerShell; it installs $RELEASE_TAG by default (same as -Version $RELEASE_TAG). Read docs/AGENT-QUICKSTART.md for agent installation and docs/CUSTOMIZE.md to build a company Hub. Use your own AI account; model access requires official login." *.exe *.zip install-release.ps1 release-manifest.json SHA256SUMS.txt $(ls *-update.gz *-update-delta.gz latest.json 2>/dev/null)

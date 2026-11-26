@@ -31,7 +31,8 @@ function createAccountAdapters({dataDir,homeDir=os.homedir(),env=process.env,run
    loginConfirmed:row=>{terminal.complete?.(row);onLoginComplete({id:row.id,success:true,message:row.name+' 授权已确认（测试夹具）'});},
    login:row=>env.CLAUDE_HUB_ACCOUNT_TERMINAL_FIXTURE==='1'&&row.type==='native'
     ? terminal(env.CLAUDE_HUB_ACCOUNT_TERMINAL_NODE || 'node.exe',[fixture,'terminal-login',Buffer.from(JSON.stringify({id:row.id,home:row.home})).toString('base64')],{...env,USERPROFILE:homeDir,HOME:homeDir,CLAUDE_CONFIG_DIR:row.home},row)
-    : invoke('login',row),submitCode:async()=>({stage:'checking',message:'夹具已接收验证码'})};
+    : invoke('login',row),submitCode:async()=>({stage:'checking',message:'夹具已接收验证码'}),
+   submitAgyCode:(profileId)=>{setTimeout(()=>onLoginComplete({id:'gemini-'+profileId,profileId,success:true,message:'Antigravity 授权完成（夹具）'}),300);return {message:'授权码已提交（夹具）'};}};
  }
  const codexLogin=new(require('./codex-browser-login').CodexBrowserLogin)({onComplete:onLoginComplete});
  const deviceLogin=new(require('./codex-device-login').CodexDeviceLogin)({onComplete:onLoginComplete});
@@ -89,7 +90,10 @@ function createAccountAdapters({dataDir,homeDir=os.homedir(),env=process.env,run
  codexMailbox:(row,email,options)=>{external();return deviceLogin.mailbox(row,email,options);},
  codexDevicePage:(row,options)=>{external();return deviceLogin.page(row,options);},
  loginConfirmed:row=>{terminal.complete?.(row);onLoginComplete({id:row.id,success:true,message:row.name+' 授权已确认，可返回继续创建会话。'});},
- resumeLogin: row => row.provider==='codex'&&require('./codex-exit-network').dedicated(row) ? deviceLogin.resume(row) : ['claude','codex','kimi','gemini','token-plan','feishu'].includes(row.provider) && terminal.resume ? terminal.resume(row) : undefined,
+ // A dedicated-exit Antigravity round still running: hand back the same link; otherwise start a new round (false).
+ resumeLogin: row => { const p=agyNetworkProfile(row); if(p){ const t=agyPasteLogin.pending(p.id)&&agyPasteLogin.flights.get(p.id); if(t?.link)return agyPasteLogin.ticket(p,t); return agyLocalLogin.pending(p.id)?{message:'专用浏览器授权进行中，请在那个窗口里完成'}:false; }
+  return row.provider==='codex'&&require('./codex-exit-network').dedicated(row) ? deviceLogin.resume(row) : ['claude','codex','kimi','gemini','token-plan','feishu'].includes(row.provider) && terminal.resume ? terminal.resume(row) : undefined; },
+ submitAgyCode: (profileId, code) => agyPasteLogin.submit(profileId, code),
  async open(row){
   external();
   if(row.managedBrowser)return browser.open(row.provider);
@@ -154,7 +158,7 @@ function createAccountAdapters({dataDir,homeDir=os.homedir(),env=process.env,run
   return {state:'unknown',message:'此工具未提供已适配的只读登录检测；可直接打开官方登录入口',source:'官方工具'};
  },
  async submitCode(row,code){return browser.submitCode(row.provider,code);},
- async login(row,{phone='',confirmed=false,email=''}={}){
+ async login(row,{phone='',confirmed=false,email='',agyMode=''}={}){
   if(row.managedBrowser){const opened=await browser.open(row.provider);if(phone&&row.phoneLogin){let ready=false;for(let i=0;i<8;i++){try{await browser.command(row.provider,'true');ready=true;break;}catch{await new Promise(r=>setTimeout(r,400));}}if(ready){try{return await browser.preparePhone(row.provider,phone);}catch{return {stage:'manual',message:'自动填写结果未确认，请查看官方窗口；不会自动重试短信请求'};}}return {stage:'manual',message:'浏览器未就绪，请在官方页面继续'};}return opened;}
   if(row.provider==='bridge'){await tool('bridge','login');return {message:'已打开原中转浏览器，完成登录后检查；未推进拉取记录'};}
   if(row.provider==='images'){await tool('images','open',row.accountId);return {message:'已交给生图共享队列打开原账号浏览器；当前图片任务不会重发'};}

@@ -6,6 +6,7 @@ const CORE_KINDS = new Set(['claude', 'codex', 'gemini']);
 const accountRisk = require('./account-risk-state');
 const { claudeWorkspaceHtml, nextLabel } = require('./account-claude-view');
 const { keeperControlsHtml } = require('./account-keeper-view');
+const { createAccountSharePc } = require('./account-share-pc');
 const accountInfraOn = () => require('../core/distribution').featureEnabled('accountInfra');
 const ENV_PAGES = { claude: 'https://claude.ai/', ip: 'https://api.ipify.org/' };
 function createAccountCenterPanel({ document, ipcRenderer, escapeHtml: esc, configModal, closeOtherPanels = () => {}, openLoginSession = () => {}, resumeLaunch = () => {}, hasLaunchDraft = () => false, notify = () => {}, getClaudeQuota = null }) {
@@ -36,7 +37,12 @@ function createAccountCenterPanel({ document, ipcRenderer, escapeHtml: esc, conf
   let codexExits = null, codexExitFlight = null;
   let agyExits = null, agyExitFlight = null; // Antigravity 专线（2026-11-21）
   let deviceLogin = null;
+  let agyPaste = null; // 2026-11-26：Antigravity 专线账号的授权链接 + 手动粘回授权码
   let keeperAccounts = {}, keeperFallback = null;
+  let claudeDetailTab = 'info', sharePage = 0;
+  const sharePc = createAccountSharePc({ document, ipcRenderer, escapeHtml: esc, onChange: () => {
+    if (!page.hidden && view === 'list' && tab === 'claude') renderTools();
+  } });
   const keeperReads = new Map();
   async function refreshKeeperAccount(kind, profileId, force = false) {
     const key = kind + ':' + profileId;
@@ -256,6 +262,11 @@ function createAccountCenterPanel({ document, ipcRenderer, escapeHtml: esc, conf
       el.insertAdjacentHTML('beforeend', `<div data-codex-device-login><p>设备码：<strong>${esc(deviceLogin.deviceCode)}</strong> <button class="ac-btn" data-ac="codex-device-copy">复制设备码</button></p><p>在 VPS 远程窗口输入；授权完成后窗口自动关闭。</p><label>账号邮箱 <input class="ac-account-input" data-codex-mailbox type="email" maxlength="254" value="${esc(deviceLogin.email || '')}" placeholder="输入登录邮箱"></label> ${keeperControlsHtml('codex', deviceLogin.id.replace(/^codex-/, ''), esc, { label: '去管家打开远程窗口', busy: !!busy, account: keeperAccounts['codex:' + deviceLogin.id.replace(/^codex-/, '')] })} <button class="ac-btn" data-ac="codex-device-page">返回设备码页</button></div>`);
       void refreshKeeperAccount('codex', deviceLogin.id.replace(/^codex-/, ''));
     }
+    if (agyPaste) {
+      el.hidden = false;
+      const left = Math.max(0, Math.round((agyPaste.expiresAt - Date.now()) / 1000));
+      el.insertAdjacentHTML('beforeend', `<div data-agy-paste><p>授权链接（出口 ${esc(agyPaste.ip || '')}）：<input class="ac-account-input" data-agy-paste-url readonly style="width:min(560px,60%)" value="${esc(agyPaste.url)}"> <button class="ac-btn" data-ac="agy-paste-copy">复制链接</button></p><p>到装了「AI Hub 专线」扩展的那个 Chrome 资料里打开，选这个账号、点「继续」，把页面上的授权码粘到下面。${left ? '还剩约 ' + left + ' 秒。' : '这一轮已过期，请重新点「授权」。'}</p><label>授权码 <input class="ac-account-input" data-agy-paste-code style="width:min(420px,50%)" autocomplete="off" spellcheck="false" maxlength="2048" value="${esc(agyPaste.code || '')}" placeholder="粘贴授权码"></label> <button class="ac-btn" data-ac="agy-paste-submit" ${busy ? 'disabled' : ''}>提交</button> <button class="ac-text-btn" data-ac="agy-paste-close">关闭</button></div>`);
+    }
     if (keeperFallback) {
       el.hidden = false;
       el.insertAdjacentHTML('beforeend', `<p><button class="ac-btn" data-ac="keeper-fallback" data-kind="${keeperFallback.kind}" data-profile="${esc(keeperFallback.profileId)}">仍在 Hub 里打开远程窗口</button></p>`);
@@ -293,7 +304,9 @@ function createAccountCenterPanel({ document, ipcRenderer, escapeHtml: esc, conf
     const mailFocus = body.contains(document.activeElement) ? (document.activeElement.dataset?.mailField || document.activeElement.dataset?.wizField) : '';
     if (tab === 'claude') {
       const quota = quotaFor();
-      body.innerHTML = claudeWorkspaceHtml(state, esc, { edit: accountEdit, vps, mail, exits, quota, tokens: tokenData ? accountTotals(tokenData, 'claude') : null, selected: claudeSelected, filter: claudeFilter, query: search.value, wizard, busy: !!busy, keeperAccounts });
+      body.innerHTML = claudeWorkspaceHtml(state, esc, { edit: accountEdit, vps, mail, exits, quota, tokens: tokenData ? accountTotals(tokenData, 'claude') : null, selected: claudeSelected, filter: claudeFilter, query: search.value, wizard, busy: !!busy, keeperAccounts, shareState: sharePc.state, detailTab: claudeDetailTab, sharePage, sharePageSize: document.defaultView?.innerHeight < 850 ? 1 : 2 });
+      const selectedProfile = body.querySelector('[data-account-profile]')?.dataset.accountProfile;
+      if (selectedProfile && accountInfraOn()) void sharePc.load('claude:' + selectedProfile);
       for (const d of body.querySelectorAll('details')) d.open = expanded.includes(d.dataset.details);
       for (const b of body.querySelectorAll('[data-ac=keeper-manage]')) void refreshKeeperAccount(b.dataset.kind, b.dataset.profile);
       const field = wizard ? body.querySelector(`[data-wiz-field="${mailFocus || ''}"]`) || body.querySelector('[data-account-input]') : body.querySelector('[data-account-input]:not([data-mail-field])') || (accountEdit?.mode === 'mail' ? body.querySelector(`[data-mail-field="${mailFocus || 'email'}"]`) : null);
@@ -386,23 +399,46 @@ function createAccountCenterPanel({ document, ipcRenderer, escapeHtml: esc, conf
     } catch (e) { if (ticket === epoch) error = e.message; }
     finally { busy = ''; if (ticket === epoch) renderStatus(); schedule(); }
   }
-  async function authorize(id) {
+  async function authorize(id, extra = {}) {
     if (busy) return;
     busy = 'authorize'; error = ''; notice = ''; renderStatus();
     const ticket = epoch;
     try {
       const nativeId = id.startsWith('codex:') ? id.replace('codex:', 'codex-') : ({ gemini: 'gemini-cli' }[id] || id);
-      let r = await ipcRenderer.invoke('accounts:login', { id: nativeId });
+      let r = await ipcRenderer.invoke('accounts:login', { id: nativeId, ...extra });
       if (r?.ok && r.data?.needsConfirmation) {
         if (!window.confirm(`登录环境「${r.data.others.join('、')}」还开着。切换会关闭它，未发送的草稿可能丢失。确认切换吗？`)) return;
         r = await ipcRenderer.invoke('accounts:login', {id:nativeId,confirmed:true});
       }
       if (!r?.ok) throw Error(r?.error || '授权入口未打开');
       if (r.data?.deviceCode) deviceLogin = {...r.data,id:nativeId};
+      if (r.data?.agyPaste) agyPaste = { ...r.data, id: nativeId, code: '' };
       if (ticket === epoch) notice = r.data?.message || '已打开官方授权入口';
       if (r.data?.sessionId) { close(); await openLoginSession(r.data.sessionId); }
     } catch (e) { if (ticket === epoch) error = e.message; }
     finally { busy = ''; if (ticket === epoch) renderStatus(); }
+  }
+  async function submitAgyCode() {
+    if (!agyPaste || busy) return;
+    const code = (page.querySelector('[data-agy-paste-code]')?.value || agyPaste.code || '').trim();
+    if (!code) { error = '请先粘贴授权码'; renderStatus(); return; }
+    busy = 'agy-paste'; error = ''; agyPaste.code = code; renderStatus();
+    try {
+      const r = await ipcRenderer.invoke('accounts:antigravity-submit-code', { profileId: agyPaste.profileId, code });
+      if (!r?.ok) throw Error(r?.error || '授权码提交未完成');
+      notice = r.data.message;
+    } catch (e) { error = e.message; }
+    finally { busy = ''; renderStatus(); }
+  }
+  async function makeAgyChromeExt(profileId) {
+    if (busy) return;
+    busy = 'agy-ext'; error = ''; renderStatus();
+    try {
+      const r = await ipcRenderer.invoke('accounts:antigravity-chrome-ext', { profileId });
+      if (!r?.ok) throw Error(r?.error || '扩展未生成');
+      notice = '专线扩展已生成并打开所在文件夹（' + r.data.dir + '）。在这个账号用的 Chrome 资料里：地址栏打开 chrome://extensions → 右上角打开「开发者模式」→「加载已解压的扩展程序」→ 选这个文件夹。装好后工具栏出现蓝色「专线」角标，再打开 ippure 之类的 IP 检测页，应显示 ' + r.data.ip + '。';
+    } catch (e) { error = e.message; }
+    finally { busy = ''; renderStatus(); }
   }
   async function deviceAction(action) {
     if (!deviceLogin || busy) return;
@@ -540,6 +576,7 @@ function createAccountCenterPanel({ document, ipcRenderer, escapeHtml: esc, conf
   function close() {
     if (page.hidden) return;
     page.hidden = true; epoch++; clearTimeout(timer);
+    sharePc.close();
     document.body.classList.remove('accounts-open');
     document.getElementById('btn-rail-accounts')?.setAttribute('aria-expanded', 'false');
     if (previousFocus?.isConnected) previousFocus.focus();
@@ -590,7 +627,17 @@ function createAccountCenterPanel({ document, ipcRenderer, escapeHtml: esc, conf
     else if (a === 'agy-bind-edit') { editAccount({ mode: 'agy-bind', kind: 'gemini', profileId: b.dataset.profile, exit: '' }); void refreshAgyExits(); }
     else if (a === 'agy-bind-select') { if (accountEdit?.mode === 'agy-bind') editAccount({ ...accountEdit, exit: b.dataset.exit }); }
     else if (a === 'agy-bind-save') void bindAgyExit(b.dataset.profile);
-    else if (a === 'acb-select') { claudeSelected = b.dataset.profile; wizard = null; accountEdit = null; renderTools(); body.querySelector('.acb-detail')?.scrollTo?.(0, 0); }
+    else if (a === 'agy-paste-copy' && agyPaste) { void navigator.clipboard.writeText(agyPaste.url).then(() => { notice = '授权链接已复制'; renderStatus(); }); }
+    else if (a === 'agy-paste-submit') void submitAgyCode();
+    else if (a === 'agy-paste-close') { agyPaste = null; renderStatus(); }
+    else if (a === 'agy-dedicated-login') void authorize('gemini-' + b.dataset.profile, { agyMode: 'dedicated' });
+    else if (a === 'agy-chrome-ext') void makeAgyChromeExt(b.dataset.profile);
+    else if (a === 'acb-select') { claudeSelected = b.dataset.profile; wizard = null; accountEdit = null; sharePage = 0; renderTools(); body.querySelector('.acb-detail')?.scrollTo?.(0, 0); }
+    else if (a === 'acb-detail-tab') { claudeDetailTab = b.dataset.tab; renderTools(); }
+    else if (a === 'share-open') void sharePc.open('claude:' + b.dataset.profile, { label: state?.clis?.find(c => c.kind === 'claude' && (c.profileId || 'default') === b.dataset.profile)?.label });
+    else if (a === 'share-revoke') void sharePc.open(b.dataset.account, { mode: 'revoke', device: b.dataset.device });
+    else if (a === 'share-refresh') void sharePc.load(b.dataset.account, true);
+    else if (a === 'share-page') { sharePage = Number(b.dataset.page) || 0; renderTools(); }
     else if (a === 'acb-filter') { claudeFilter = !claudeFilter; renderTools(); }
     else if (a === 'acb-new') startWizard();
     else if (a === 'acb-resume') resumeWizard(b.dataset.profile);
@@ -639,6 +686,7 @@ function createAccountCenterPanel({ document, ipcRenderer, escapeHtml: esc, conf
   search.addEventListener('input', renderTools);
   page.addEventListener('input', e => {
     if (e.target.matches?.('[data-codex-mailbox]') && deviceLogin) deviceLogin.email = e.target.value;
+    if (e.target.matches?.('[data-agy-paste-code]') && agyPaste) agyPaste.code = e.target.value;
     else if (e.target.dataset?.riskField && accountEdit?.mode === 'risk') accountEdit[e.target.dataset.riskField] = e.target.value;
     else if (e.target.dataset?.wizField && wizard) wizard.mail = { ...wizard.mail, [e.target.dataset.wizField]: e.target.value };
     else if (e.target.matches?.('[data-account-input]') && wizard) wizard.value = e.target.value;
@@ -678,11 +726,12 @@ function createAccountCenterPanel({ document, ipcRenderer, escapeHtml: esc, conf
   ipcRenderer.on('hub-accounts:attention', (_event, n) => setBadge(n));
   void ipcRenderer.invoke('hub-accounts:attention').then(r => { if (r?.ok) setBadge(r.data); }).catch(() => {});
   ipcRenderer.on('launch-auth-status',async(_event,result)=>{
+    if (agyPaste && result?.profileId === agyPaste.profileId) { agyPaste = null; if (!page.hidden) { notice = result.success ? result.message : ''; error = result.success ? '' : result.message; renderStatus(); void refreshAgyExits(); void refresh(); } return; }
     if (deviceLogin?.id === result?.id && !result.required) deviceLogin = null;
     if (result?.required) {
       authTarget = result.id?.startsWith('codex-') ? result.id.replace('codex-', 'codex:') : result.id === 'gemini-cli' ? 'gemini' : result.id;
       // 只在右侧额度栏那张号卡上写「需重新登录」，并弹一条提示；账号页已经开着时才定位到授权按钮。
-      if (page.hidden) { notify(result.message); return; }
+      if (page.hidden || sharePc.isOpen()) { notify(result.message); return; }
       returnToLaunch = result.source === 'launch' && hasLaunchDraft(); tab = 'platform'; search.value = '';
       notice = result.message; render();
       const target = [...body.querySelectorAll('[data-ac="authorize"]')].find(b => b.dataset.id === authTarget);
@@ -692,7 +741,7 @@ function createAccountCenterPanel({ document, ipcRenderer, escapeHtml: esc, conf
   });
   ipcRenderer.on('session-created',(_event,{session})=>{if(session.kind!=='powershell'){returnToLaunch=false;authTarget='';}});
   window.addEventListener('launch-center:session-opened',event=>{if(!event.detail?.preserveDraft){returnToLaunch=false;authTarget='';}});
-  window.addEventListener('resize', position);
+  window.addEventListener('resize', () => { position(); if (!page.hidden && tab === 'claude') renderTools(); });
   window.addEventListener('focus', () => {
     if (!page.hidden && !busy) for (const b of page.querySelectorAll('[data-ac=keeper-manage]')) void refreshKeeperAccount(b.dataset.kind, b.dataset.profile, true);
   });

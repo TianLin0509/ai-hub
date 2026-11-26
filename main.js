@@ -2575,9 +2575,11 @@ if (require('./core/distribution').featureEnabled('assistant')) try {
       return () => fallback.withFallback(progressCards?.snapshot?.() || [], global.__teamService?.listTeams?.() || []);
     })(),
     createSession: (kind, opts) => sessionOperations.createSession({ kind, opts }),
-    sendPrompt: (sessionId, text, clientSubmissionId) => promptOperations.submitPrompt(null, { sessionId, text, clientSubmissionId, waitForCliReady: true }),
+    // options（重启续跑卡，2026-11-26）：shouldWrite 真正写入前再判一次；noStuckRecovery 送达不明只标需核对，不走后台补发。
+    sendPrompt: (sessionId, text, clientSubmissionId, options = {}) => promptOperations.submitPrompt(null, { sessionId, text, clientSubmissionId, waitForCliReady: true,
+      ...(typeof options.shouldWrite === 'function' ? { shouldWrite: options.shouldWrite } : {}), ...(options.noStuckRecovery === true ? { noStuckRecovery: true } : {}) }),
     readSessionTurns: (id, opts) => {
-      const s = sessionManager.getSession(id) || require('./core/session-store').loadSessionFile(id, { strict: true });
+      const s = sessionManager.getSession(id) || savedSessionMeta(id);
       if (!s) throw new Error('会话已不存在');
       return require('./main/ipc/transcript-handlers').parseSessionTranscript({ hubSessionId: id, ccSessionId: s.ccSessionId || null, transcriptPath: s.transcriptPath || null, kind: s.kind || null, opts }, transcriptIpcDeps);
     },
@@ -2620,7 +2622,7 @@ if (require('./core/distribution').featureEnabled('assistant')) try {
       if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,160}$/.test(id)) return null;
       const live = sessionManager.getSession(id);
       if (live) return live;
-      const saved = require('./core/session-store').loadSessionFile(id, { strict: true });
+      const saved = savedSessionMeta(id);
       return saved ? { ...saved, id: saved.hubId || id } : null;
     },
     listKnownSessions: () => lastPersistedSessions.map(meta => ({ ...meta, id: meta.hubId || meta.id })),
@@ -2642,7 +2644,7 @@ if (require('./core/distribution').featureEnabled('assistant')) try {
     getMeetings: () => meetingManager.getAllMeetings(),
     getDefaults: kind => require('./core/session-creation-defaults').creationDefaults(kind, getHubConfig()),
     resumeSession: async (id, _launchOptions, overrides) => {
-      const meta = require('./core/session-store').loadSessionFile(id, { strict: true });
+      const meta = savedSessionMeta(id);
       // overrides：助理切换模型时，休眠中的助理直接按新模型恢复，避免先按旧模型启动再重启。
       return meta ? resumeSession({ ...meta, ...(overrides ? { launchOverrides: overrides } : {}), hubId: id }) : null;
     },
@@ -2719,7 +2721,7 @@ try {
     getLive: id => sessionManager.getSession(id),
     loadMeta: id => {
       if (stateStore.isMarkedRemovedSession(id)) return null;
-      const saved = require('./core/session-store').loadSessionFile(id, { strict: true });
+      const saved = savedSessionMeta(id);
       return saved ? { ...saved, id: saved.hubId || id } : null;
     },
     isTurnActive: id => sessionManager.isAgentTurnActive(id),
@@ -2729,7 +2731,7 @@ try {
     readFirstPrompt: meta => require('./core/auto-resume/first-prompt').readFirstUserText(meta?.transcriptPath),
     readLastReply: meta => require('./core/auto-resume/first-prompt').readLastAssistantText(meta?.transcriptPath),
     resumeSession: async id => {
-      const meta = require('./core/session-store').loadSessionFile(id, { strict: true });
+      const meta = savedSessionMeta(id);
       if (!meta) throw new Error('找不到会话记录');
       // backgroundMarked：自动续跑已为这次恢复打了后台标记（并负责撤销），resume-session 不再另打（返工单 3 第 2 条）。
       return resumeSession({ ...meta, hubId: id, launchOverrides: { openInBackground: true, backgroundMarked: true } });
@@ -2776,7 +2778,7 @@ try {
     intervalMs: process.env.CLAUDE_HUB_E2E === '1' && Number(process.env.HUB_PATROL_INTERVAL_MS) > 0 ? Number(process.env.HUB_PATROL_INTERVAL_MS) : 60_000,
   });
   if (assistantService?.autoResumeCards) assistantService.autoResumeCards.patrol = {
-    list: () => patrol.list(), dismiss: id => patrol.dismiss(id), resume: id => autoResume.resumeFromPatrol(id),
+    list: () => patrol.list(), dismiss: (id, expectId) => patrol.dismiss(id, expectId), resume: id => autoResume.resumeFromPatrol(id),
     enabled: () => getHubConfig().autoResumeEnabled !== false,
     setEnabled: on => {
       const hubConfig = require('./core/hub-config');
@@ -2806,7 +2808,7 @@ ipcMain.handle('session:set-auto-resume', (_event, payload = {}) => {
     sessionManager.updateSessionMeta(id, { autoResumeDisabled: disabled });
     try { sessionStore.saveSessionFile(id, sessionManager.getSession(id)); } catch (error) { return { ok: false, error: error.message }; }
   } else {
-    const saved = require('./core/session-store').loadSessionFile(id, { strict: true });
+    const saved = savedSessionMeta(id);
     if (!saved) return { ok: false, error: '找不到会话' };
     sessionStore.saveSessionFile(id, { ...saved, autoResumeDisabled: disabled });
   }
@@ -2857,7 +2859,7 @@ try {
     const live = new (require('./core/hub-assistant/live-history').LiveHistory)();
     const loadMeta = id => {
       if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,160}$/.test(id)) return null;
-      const saved = require('./core/session-store').loadSessionFile(id, { strict: true });
+      const saved = savedSessionMeta(id);
       return saved ? { ...saved, id: saved.hubId || id } : null;
     };
     companyAssistantService = new CompanyAssistant({
@@ -2869,7 +2871,7 @@ try {
       sendPrompt: (sessionId, text, clientSubmissionId) => promptOperations.submitPrompt(null, { sessionId, text, clientSubmissionId, waitForCliReady: true }),
       getSession: id => sessionManager.getSession(id),
       getSessionMetadata: loadMeta,
-      resumeSession: async id => { const meta = require('./core/session-store').loadSessionFile(id, { strict: true }); return meta ? resumeSession({ ...meta, hubId: id }) : null; },
+      resumeSession: async id => { const meta = savedSessionMeta(id); return meta ? resumeSession({ ...meta, hubId: id }) : null; },
       // 「重开助理会话」走 Hub 现有的重启（休眠 → 按原会话恢复），恢复时重新经过 extraMcpProvider 挂会话工具。
       restartSession: id => sessionOperations.restartSession(id),
       // 只给隔离端到端测试：推迟会话工具接口开始监听，复现「会话先于接口建好」。
@@ -2968,7 +2970,7 @@ try {
     const live = new (require('./core/hub-assistant/live-history').LiveHistory)();
     const loadMeta = id => {
       if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,160}$/.test(id)) return null;
-      const saved = require('./core/session-store').loadSessionFile(id, { strict: true });
+      const saved = savedSessionMeta(id);
       return saved ? { ...saved, id: saved.hubId || id } : null;
     };
     companyForumBrowser = require('./main/company-forum-browser').createForumBrowser({ BrowserWindow, BaseWindow, session: require('electron').session });
@@ -2981,7 +2983,7 @@ try {
       sendPrompt: (sessionId, text, clientSubmissionId) => promptOperations.submitPrompt(null, { sessionId, text, clientSubmissionId, waitForCliReady: true }),
       getSession: id => sessionManager.getSession(id),
       getSessionMetadata: loadMeta,
-      resumeSession: async id => { const meta = require('./core/session-store').loadSessionFile(id, { strict: true }); return meta ? resumeSession({ ...meta, hubId: id }) : null; },
+      resumeSession: async id => { const meta = savedSessionMeta(id); return meta ? resumeSession({ ...meta, hubId: id }) : null; },
       isAgentTurnActive: id => sessionManager.isAgentTurnActive(id),
       readFinals: meta => { const r = live.read({ ...meta, id: meta.id || meta.hubId, kind: 'claude' }); return r && r.available ? r.records : []; },
       onChanged: () => sendToRenderer('company-forum:changed', {}),
@@ -3063,7 +3065,7 @@ if (require('./core/distribution').featureEnabled('leadTeam')) try {
     // firstLaunch：成员从没开始过对话（开工消息未送达），按原配置首次启动同一身份，不走续接。
     wakeSession: async (id, options = {}) => {
       if (!require('./main/team/wake').canWakeTeamSession(id, lastPersistedSessions, sessionManager.getSession(id))) return false;
-      const meta = require('./core/session-store').loadSessionFile(id, { strict: true });
+      const meta = savedSessionMeta(id);
       if (!meta) return false;
       await resumeSession({ ...meta, hubId: id, ...(options.firstLaunch ? { launchOverrides: { claudeFirstLaunch: true } } : {}) });
       return true;
@@ -3099,6 +3101,8 @@ if (assistantService && require('./core/distribution').featureEnabled('assistant
     nodeExecutable: process.versions.electron ? process.execPath : 'node', runAsNode: !!process.versions.electron,
     script: path.join(__dirname, 'scripts', 'hub.js'),
   });
+  // 组队指路要读的 hub-driver：随包带了就装进各 CLI 的 skill 目录（手放的、改过的不动，core/team-guide.js）。
+  try { require('./core/team-guide').installBundled(); } catch (error) { console.warn('[team-guide] 安装 hub-driver 失败：', error.message); }
   // 经 hub 建出的会话与组队成员一样在后台启动、恢复，不继承光标。
   sessionManager.setBackgroundTerminalPredicate(id => {
     const team = global.__teamService;
@@ -3195,6 +3199,19 @@ const bootState = bootOwners.editSessions([], () => stateStore.loadAndSelfHeal({
 //   bootWasCleanShutdown 是它额外暴露的"原始盘上值"，告知是否上次优雅退出。
 const bootWasClean = !!bootState.bootWasCleanShutdown;
 let lastPersistedSessions = Array.isArray(bootState.sessions) ? bootState.sessions : [];
+// 休眠会话的资料（2026-11-26 重启续跑事故）：先读每会话一份的备份文件（sid 类字段最新），没有就用总表 state.json 里的那条。
+// 每会话文件只覆盖少数会话（11-26 生产 2926 个会话里只有 31 个有文件）；只读文件会把休眠会话误判成「已删除」——
+// 重启卡「全部继续」21 个里 12 个因此没发、hub session send 报「目标会话已不存在」、自动续跑与团队叫醒同样找不到。
+function savedSessionMeta(id) {
+  if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,160}$/.test(id)) return null;
+  // 已被移除（关群聊、移除成员、侧栏删除）的会话：界面下一轮保存前总表里还有旧条目、删文件也可能失败留下残留，
+  // 都不能让它复活（审查 P1-4 / 复审 R3）。先挡，再读文件和总表；正常休眠的会话不受影响。
+  try { if (stateStore.wasRemovedSession(id)) return null; } catch {}
+  const file = require('./core/session-store').loadSessionFile(id, { strict: true });
+  if (file) return file;
+  const row = (Array.isArray(lastPersistedSessions) ? lastPersistedSessions : []).find(s => s && (s.hubId || s.id) === id);
+  return row ? { ...row, hubId: row.hubId || id } : null;
+}
 // 2026-07-29 三方审查（Kimi 发现）：healPersistedCwds 自 2026-05 引入以来只被 import、
 // 里存的还是旧路径，唤醒这类休眠会话会静默回落 Home（见 session-manager 的 cwdFellBack）。
 // transcript 的 jsonl 头里存着 CLI 当时真正用过的 cwd；只有该目录现在仍真实存在时
@@ -4263,6 +4280,7 @@ ipcMain.handle('refresh-codex-other-usage', (_event, opts = {}) => codexOtherUsa
 const antigravityProfilesUsage = require('./main/usage/antigravity-profiles-usage').createAntigravityProfilesUsage({getConfig:getHubConfig,
   file: path.join(getHubDataDir(), 'antigravity-usage.json')});
 const accountProfileUsage = require('./main/usage/account-profile-usage').createAccountProfileUsage({
+  accountSeq: () => require('./core/account-seq').sharedSeq(),
   antigravityProfiles: antigravityProfilesUsage.profiles,
   antigravityScope: antigravityProfilesUsage.scope,
   antigravityCached: antigravityProfilesUsage.cached,
@@ -4482,7 +4500,8 @@ const hubMemoryService = new HubMemoryService({
 require('./main/ipc/hub-memory-handlers').registerHubMemoryIpc(ipcMain,hubMemoryService);
 // 「规则」页（2026-10-12）：通用规则 + 我的规则，随会话第一条消息送达；手动检查更新。
 try {
-  const hubRules=require('./core/hub-rules').createHubRulesStore({dataDir:getHubDataDir(),channel:require('./core/distribution').rulesChannel});
+  const hubRules=require('./core/hub-rules').createHubRulesStore({dataDir:getHubDataDir(),channel:require('./core/distribution').rulesChannel,
+    teamGuide:()=>require('./core/team-guide').guideText({dataDir:getHubDataDir()})});
   hubMemoryService.hubRules=hubRules;
   require('./main/ipc/hub-rules-handlers').registerHubRulesIpc(ipcMain,{store:hubRules,memoryService:hubMemoryService,shell});
 } catch (e) {

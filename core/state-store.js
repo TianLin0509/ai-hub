@@ -22,7 +22,12 @@ const _removedSessionIds = new Set();
 const { preserveLatestInteraction } = require('./session-recency');
 const _removedMeetingIds = new Set();
 
-function markRemovedSession(hubId) { if (hubId) _removedSessionIds.add(hubId); }
+function markRemovedSession(hubId) { if (hubId) { _removedSessionIds.add(hubId); _everRemoved(hubId); } }
+// 本进程里删过的会话（保存时不清空，上限 5000）：main.js 的 savedSessionMeta 据此不从旧总表 / 残留文件把已删会话找回来
+// （2026-11-26 重启续跑修复，Codex 复审 R3：_removedSessionIds 在保存时被清空，之后旧总表还能命中）。
+const _everRemovedSessionIds = new Set();
+function _everRemoved(hubId) { _everRemovedSessionIds.add(hubId); if (_everRemovedSessionIds.size > 5000) _everRemovedSessionIds.delete(_everRemovedSessionIds.values().next().value); }
+function wasRemovedSession(hubId) { return _removedSessionIds.has(hubId) || _everRemovedSessionIds.has(hubId); }
 function markRemovedMeeting(meetingId) { if (meetingId) _removedMeetingIds.add(meetingId); }
 // 2026-05-07 多方审查 fix：暴露 isMarked* 给 session-store/meeting-store 的 markDirty
 //   做防御。renderer schedulePersist 是 400ms 防抖的，close-meeting 同步标记 removed
@@ -465,6 +470,7 @@ module.exports = {
   markRemovedSession,
   markRemovedMeeting,
   isMarkedRemovedSession,
+  wasRemovedSession,
   isMarkedRemovedMeeting,
   STATE_FILE,
   LOCK_FILE,

@@ -316,9 +316,11 @@ class Patrol {
     return true;
   }
 
-  dismiss(sessionId) {
+  // expectId：「全部忽略」带上点击那一刻的提醒编号；期间换成了新提醒就不动它（Codex 审查 11-26）。
+  dismiss(sessionId, expectId = null) {
     const r = this.reminders.get(sessionId);
     if (!r) return false;
+    if (expectId && r.id !== expectId) return false;
     this.dismissed.add(`${sessionId}|${r.since}`);
     this.reminders.delete(sessionId);
     this.log({ kind: 'patrol-dismiss', sessionId, title: r.title, cause: r.cause, since: r.since });

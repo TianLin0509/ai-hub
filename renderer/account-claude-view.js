@@ -5,6 +5,8 @@ const { authLabel, authorizeButton, accountFormHtml, accountMenuHtml, loginEnvHt
 const { formatTokens } = require('./account-token-view');
 const accountRisk = require('./account-risk-state');
 const { keeperControlsHtml } = require('./account-keeper-view');
+const { shareStatusHtml, readyDevices } = require('./account-share-pc');
+const { SHARE_MARK } = require('./account-quota-panel');
 
 const EXITS_ID = '__exits';
 const AUTHED = new Set(['authorized', 'signed_in', 'api_key']);
@@ -19,7 +21,10 @@ const claudeRows = state => (state?.clis || []).filter(c => c.kind === 'claude')
 // 名称里的编号，用来给新账号起默认名「账号N」。
 function nextLabel(rows) {
   const nums = rows.map(c => Number(/(\d+)/.exec(c.label || '')?.[1])).filter(Number.isFinite);
-  return '账号' + ((nums.length ? Math.max(...nums) : rows.length) + 1);
+  // 固定序号（2026-11-26）：nextSeq 是主进程记的「下一个序号」，删过的号的数字不会再发给新号。
+  const seqFloor = rows.map(c => Number(c.nextSeq) - 1).filter(n => Number.isFinite(n) && n > 0);
+  const top = Math.max(nums.length ? Math.max(...nums) : rows.length, ...seqFloor);
+  return '账号' + (top + 1);
 }
 function envRow(vps, c) { return (vps?.accounts || []).find(a => a.profileId === idOf(c)) || null; }
 function routeOf(vps, ip) { return ip ? (vps?.routes || []).find(r => r.ip === ip) || null : null; }
@@ -29,7 +34,7 @@ function exitOf(exits, c) {
 }
 // 一个账号此刻要不要人处理：授权、登录环境、出口检查三处的问题，取最要紧的一个。
 function statusOf(c, vps, exits) {
-  if (accountRisk.active('claude', idOf(c))) return { tone: 'bad', text: '风控观察中' };
+  if (accountRisk.riskShown('claude', idOf(c))) return { tone: 'bad', text: '风控观察中' };
   if (c.state === 'expired') return { tone: 'warn', text: '需要重新授权' };
   if (!AUTHED.has(c.state)) return { tone: 'warn', text: '未授权' };
   const env = envRow(vps, c);
@@ -60,7 +65,8 @@ function listHtml(rows, o, esc) {
   const item = i => {
     const id = idOf(i.c), remain = pct(i.qv?.remain5h);
     const sub = (['warn', 'bad'].includes(i.s.tone) ? `<em class="acb-warn">${esc(i.s.text)}</em> · ` : '') + esc(i.env?.runIp ? routeName(i.r) + ' · ' + i.env.runIp : (i.c.account || '账号未确认'));
-    return `<button class="acb-item" data-ac="acb-select" data-profile="${esc(id)}" aria-selected="${selected === id && !wizard}"><span class="acb-dot ${i.s.tone}" aria-hidden="true"></span><span class="acb-name">${esc(i.c.label || id)}${i.c.isDefault ? '<span class="acb-use">用量中</span>' : ''}</span><span class="acb-mini" title="${esc(remain === null ? '5 小时额度：暂无数据' : '5 小时剩余 ' + remain + '%')}"><i style="width:${remain === null ? 0 : Math.max(remain, 2)}%"></i></span><span class="acb-sub">${sub}</span></button>`;
+    const shared = infraOn() && (readyDevices(o.shareState?.('claude:' + id)?.data).length || accountRisk.sharedTo('claude', id)?.length);
+    return `<button class="acb-item" data-ac="acb-select" data-profile="${esc(id)}" aria-selected="${selected === id && !wizard}"><span class="acb-dot ${i.s.tone}" aria-hidden="true"></span><span class="acb-name">${esc(i.c.label || id)}${shared ? `<span class="ac-share-mark" title="已共享">${SHARE_MARK}<small>已共享</small></span>` : ''}${i.c.isDefault ? '<span class="acb-use">用量中</span>' : ''}</span><span class="acb-mini" title="${esc(remain === null ? '5 小时额度：暂无数据' : '5 小时剩余 ' + remain + '%')}"><i style="width:${remain === null ? 0 : Math.max(remain, 2)}%"></i></span><span class="acb-sub">${sub}</span></button>`;
   };
   const draft = wizard && !wizard.profileId ? `<button class="acb-item" data-ac="acb-wizard" aria-selected="true"><span class="acb-dot draft" aria-hidden="true"></span><span class="acb-name">${esc(wizard.value || '新账号')}</span><span></span><span class="acb-sub">新建中 · ${infraOn() ? `第 ${wizard.step} / 4 步` : `第 ${wizard.step === 1 ? 1 : 2} / 2 步`}</span></button>` : '';
   const vpsOk = vps && vps.enabled !== false;
@@ -112,8 +118,12 @@ function detailHtml(c, o, esc) {
   const editing = edit && edit.kind === 'claude' && edit.profileId === id && ['rename', 'remove'].includes(edit.mode);
   const authed = AUTHED.has(c.state);
   const resume = !authed ? `<p class="acb-resume">这个账号还没有完成授权。<button class="ac-text-btn" data-ac="acb-resume" data-profile="${esc(id)}">继续设置 →</button></p>` : '';
-  return `<div class="acb-detail-in" data-account-profile="${esc(id)}"><div class="acb-head"><div><h2>${esc(c.label || id)}</h2><p>${esc(c.account || '账号未确认')}<span class="acb-tag ${authed ? 'ok' : 'warn'}">${authLabel(c.state)}</span>${c.isDefault ? '<span class="acb-tag use">当前用量账号</span>' : ''}${o.tokens?.[id] ? `<span class="acb-tag">近 30 天 ${esc(formatTokens(o.tokens[id]))} token</span>` : ''}</p></div><div class="ac-row-actions"><button class="ac-open" data-ac="claude-quota" data-profile="${esc(c.profileId)}" ${c.isDefault ? 'disabled aria-pressed="true"' : 'aria-pressed="false"'}>${c.isDefault ? '当前用量账号' : '使用此账号额度'}</button>${authorizeButton(c, esc)}${accountMenuHtml('claude', c, esc)}</div></div>${riskHtml('claude', c, esc, edit)}${editing ? accountFormHtml(edit, esc, c.label || id) : ''}${resume}
-    ${quotaHtml(o.quota?.[id], now)}${exitHtml(c, o, esc)}<section class="acb-sect acb-mail"><h3>邮箱资料</h3>${mailboxHtml(c, mail, esc, edit && edit.kind === 'claude' ? edit : null) || '<p class="ac-tool-help">邮箱资料读取中…</p>'}</section></div>`;
+  const account = 'claude:' + id, share = o.shareState?.(account), shared = o.detailTab === 'shares' && infraOn();
+  const shareButton = infraOn() ? `<button class="ac-btn" data-ac="share-open" data-profile="${esc(id)}">共享到笔记本</button>` : '';
+  const risk = riskHtml('claude', c, esc, edit);
+  const tabs = infraOn() ? `<div class="ac-share-tabs" role="tablist" aria-label="账号详情内容"><button role="tab" aria-selected="${!shared}" data-ac="acb-detail-tab" data-tab="info">账号资料</button><button role="tab" aria-selected="${shared}" data-ac="acb-detail-tab" data-tab="shares">共享状态${readyDevices(share?.data).length ? ' · ' + readyDevices(share.data).length + ' 台' : ''}</button></div>` : '';
+  return `<div class="acb-detail-in" data-account-profile="${esc(id)}"><div class="acb-head"><div><h2>${esc(c.label || id)}</h2><p>${esc(c.account || '账号未确认')}<span class="acb-tag ${authed ? 'ok' : 'warn'}">${authLabel(c.state)}</span>${c.isDefault ? '<span class="acb-tag use">当前用量账号</span>' : ''}${o.tokens?.[id] ? `<span class="acb-tag">近 30 天 ${esc(formatTokens(o.tokens[id]))} token</span>` : ''}</p></div><div class="ac-row-actions"><button class="ac-open" data-ac="claude-quota" data-profile="${esc(c.profileId)}" ${c.isDefault ? 'disabled aria-pressed="true"' : 'aria-pressed="false"'}>${c.isDefault ? '当前用量账号' : '使用此账号额度'}</button>${shareButton}${authorizeButton(c, esc)}${accountMenuHtml('claude', c, esc)}</div></div>${risk}${editing ? accountFormHtml(edit, esc, c.label || id) : ''}${resume}
+    ${quotaHtml(o.quota?.[id], now)}${tabs}${shared ? shareStatusHtml(account, share, esc, o.sharePage, o.sharePageSize) : `${exitHtml(c, o, esc)}<section class="acb-sect acb-mail"><h3>邮箱资料</h3>${mailboxHtml(c, mail, esc, edit && edit.kind === 'claude' ? edit : null) || '<p class="ac-tool-help">邮箱资料读取中…</p>'}</section>`}</div>`;
 }
 
 function exitsPageHtml(rows, o, esc) {

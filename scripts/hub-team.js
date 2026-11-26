@@ -62,7 +62,7 @@ function buildRequest(argv) {
 
 // options 供 hub 命令（scripts/hub.js）复用：换路径 /api/hub、放宽超时、超时提示带重试键。
 function post(body, env = process.env, { path = '/api/team', timeoutMs = 30000, timeoutHint = '' } = {}) {
-  const port = Number(env.CLAUDE_HUB_PORT), token = env.CLAUDE_HUB_TOKEN, sessionId = env.CLAUDE_HUB_SESSION_ID;
+  const port = Number(env.CLAUDE_HUB_PORT), token = env.CLAUDE_HUB_TOKEN, sessionId = env.CLAUDE_HUB_SESSION_ID || env.AI_HUB_SESSION_ID; // 原生 Codex 只带后者（core/session-manager.js）
   if (!port || !token || !sessionId) return Promise.reject(Error('没找到 Hub 会话环境变量（CLAUDE_HUB_PORT / CLAUDE_HUB_TOKEN / CLAUDE_HUB_SESSION_ID）；这个命令只能在 Hub 里的会话中运行'));
   const teamToken = env.CLAUDE_HUB_TEAM_TOKEN;
   if (!teamToken) return Promise.reject(Error('当前会话启动于旧版 Hub，重启该会话后可用'));

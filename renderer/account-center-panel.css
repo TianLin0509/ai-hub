@@ -214,6 +214,39 @@
 .acb-btns{display:flex;gap:8px;flex-wrap:wrap}
 .acb-btns .ac-btn{padding:8px 14px;color:#30405e}
 .acb-mail .ac-mailbox{margin:0}
+.ac-share-tabs{display:flex;gap:18px;border-bottom:1px solid #e3e8ef}
+.ac-share-tabs button{border:0;border-bottom:2px solid transparent;background:none;padding:9px 0;font:inherit;font-size:13px;color:#63748e;cursor:pointer}
+.ac-share-tabs button[aria-selected=true]{border-bottom-color:#216aff;color:#1764e9;font-weight:600}
+.ac-share-mark{display:inline-flex;align-items:center;gap:3px;color:#71849f}
+.ac-share-mark svg{width:9px;height:9px;fill:none;stroke:currentColor;stroke-width:1.3;flex:none}
+.ac-share-mark small{font-size:11px;font-weight:400}
+.ac-share-device{padding:10px 0;border-bottom:1px solid #eef1f6;font-size:13px}
+.ac-share-device>div{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.ac-share-device p{margin:7px 0;color:#63748e}
+.ac-share-path{white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;font-size:12px}
+.ac-share-pager{display:flex;align-items:center;gap:12px;margin-top:12px;font-size:12px;color:#63748e}
+#account-share-pc-dialog{z-index:1100;color-scheme:light}
+.ac-share-modal{width:650px;max-width:calc(100vw - 48px);max-height:calc(100vh - 100px);background:#fff;border-color:#e3e8ef;color:#30405e}
+.ac-share-modal .modal-header{background:#f8fafd;border-color:#e3e8ef}
+.ac-share-modal .modal-title{color:#14213b;white-space:normal;flex:1}
+.ac-share-modal .modal-close{color:#63748e}
+.ac-share-modal button:disabled{opacity:.5;cursor:wait}
+.ac-share-modal button:focus-visible,.ac-share-modal input:focus-visible,.ac-share-modal textarea:focus-visible{outline:2px solid #216aff;outline-offset:2px}
+.ac-share-body{padding:18px 24px;overflow:auto;font-size:13px;color:#30405e}
+.ac-share-facts{margin:0;display:grid;gap:9px}
+.ac-share-facts>div{display:grid;grid-template-columns:100px minmax(0,1fr);gap:12px}
+.ac-share-facts dt{color:#63748e}.ac-share-facts dd{margin:0;overflow-wrap:anywhere}
+.ac-share-os{border:0;padding:0;margin:20px 0 14px;display:flex;gap:28px}
+.ac-share-os legend{font-weight:600;margin-bottom:10px}
+.ac-share-os label{display:flex;align-items:center;gap:6px;cursor:pointer}
+.ac-share-disruption{background:#fff8e9;border-radius:6px;padding:10px 12px;line-height:1.7;color:#85581b}
+.ac-share-problems{padding-left:20px;color:#b54323;line-height:1.8}
+.ac-share-progress progress{width:100%;height:7px;accent-color:#216aff}
+.ac-share-progress ol{padding-left:20px;line-height:1.9}
+.ac-share-result>b{display:block;color:#1f7a4d;margin:12px 0}
+.ac-share-copy-label{display:block;margin-top:16px;color:#63748e}
+.ac-share-copy-label textarea{box-sizing:border-box;display:block;width:100%;resize:none;border:1px solid #dce3ed;border-radius:6px;padding:9px;font:inherit;color:#30405e;margin:7px 0}
+.ac-share-actions{padding:14px 24px;border-top:1px solid #e3e8ef;display:flex;justify-content:flex-end;gap:8px}
 .acb-table{width:100%;border-collapse:collapse;font-size:13px}
 .acb-table th{font-weight:600;text-align:left;font-size:12px;color:#78869b;padding:5px 8px 5px 0;border-bottom:1px solid #e3e8ef}
 .acb-table td{padding:7px 8px 7px 0;border-bottom:1px solid #eef1f5;color:#22314d;font-variant-numeric:tabular-nums}

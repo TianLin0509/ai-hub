@@ -1055,7 +1055,8 @@ const sessionListRenderer = createSessionListRenderer({
       if (!Array.isArray(rows) || rows.length < 2) return null;
       const id = kind === 'gemini' ? s.antigravityProfile : kind === 'claude' ? (s.claudeProfile || 'default') : (s.codexProfile || rows.find(r => r.selected)?.profileId);
       const index = rows.findIndex(r => r.profileId === id);
-      return index < 0 ? null : { no: index + 1,
+      // 固定序号（core/account-seq.js）：与右侧栏同一个数，删号后不前移。
+      return index < 0 ? null : { no: Number(rows[index].seq) > 0 ? Number(rows[index].seq) : index + 1,
         label: (kind === 'gemini' && s.antigravityProfileLabel) || (kind === 'claude' && s.claudeProfileLabel) || rows[index].profileLabel || id };
     } catch { return null; }
   },
@@ -5975,7 +5976,12 @@ function applyPatrolStalls(list) {
   for (const s of sessions.values()) {
     const r = byId.get(s.id);
     if (r) {
-      if (!s.patrolStall || s.patrolStall.id !== r.id || s.patrolStall.idleText !== r.idleText) { s.patrolStall = { id: r.id, label: r.label, evidence: r.evidence, idleText: r.idleText }; dirty = true; }
+      if (!s.patrolStall || s.patrolStall.id !== r.id || s.patrolStall.idleText !== r.idleText) {
+        // 同一条提醒只是停顿时长在涨：保留「已看过」，不让侧栏 ⚠ 每分钟重新亮起。
+        const acked = !!(s.patrolStall && s.patrolStall.id === r.id && s.patrolStall.acked);
+        s.patrolStall = { id: r.id, label: r.label, evidence: r.evidence, idleText: r.idleText, ...(acked ? { acked: true } : {}) };
+        dirty = true;
+      }
     } else if (s.patrolStall) { delete s.patrolStall; dirty = true; }
   }
   if (dirty) scheduleSessionListRender();
@@ -6934,6 +6940,11 @@ function acknowledgeSessionFailureState(sessionOrId, options = {}) {
   let changed = clearSessionConnectionIssue(session, { render: false });
   if (session.unfinishedTurn && !session.unfinishedTurn.acknowledged) {
     session.unfinishedTurn.acknowledged = true;
+    changed = true;
+  }
+  // 提醒本身仍留在「当前概览 → 续跑」里，续跑 / 忽略 / 自动续都不受影响；同一停顿换了新提醒（id 变了）会重新亮。
+  if (session.patrolStall && !session.patrolStall.acked) {
+    session.patrolStall.acked = true;
     changed = true;
   }
   if (getSessionRuntimeTruth(session).state === RUNTIME_FAILED) {

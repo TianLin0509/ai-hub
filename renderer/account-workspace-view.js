@@ -128,9 +128,9 @@ function agyExitHtml(c, data, esc, edit) {
     const result = data.checks?.[id];
     const check = result ? `<span class="ac-keeper-check ${result.check?.status === 'ok' ? 'acb-ok' : 'acb-faint'}">${esc(result.error ? '检查失败：' + result.error : '专线检查 · 出口 ' + result.check.ip + ' · 正常')}</span>` : '<span class="ac-keeper-check acb-faint">尚未检查</span>';
     const auth = b.lastAuth ? '上次授权 ' + new Date(b.lastAuth.at).toLocaleString('zh-CN', { hour12: false }) + ' · ' + (b.lastAuth.via || '本机浏览器') + ' · 出口 ' + b.lastAuth.ip
-      : b.authorized ? '已授权（授权记录早于本版）' : '尚未授权：点「授权」会打开这个账号的专用浏览器（只走这条专线）';
+      : b.authorized ? '已授权（授权记录早于本版）' : '尚未授权';
     const lock = b.authorized ? '已授权，专线锁定' : '尚未授权，可改选专线';
-    return `<section class="ac-codex-exit" aria-label="专线与本机专用浏览器"><strong>专线与本机专用浏览器</strong><p>${esc(b.ip + ' · ' + b.name + (b.vpsName ? ' · 所在 VPS：' + b.vpsName : ''))}</p><p>${esc(lock + ' · 本机经 ' + b.proxy.replace('http://', '') + ' 出去')}</p><p>${esc(auth)}</p><p>${check} <button class="ac-text-btn" data-ac="agy-exit-check" data-profile="${esc(id)}" ${data.checking ? 'disabled' : ''}>${data.checking === id ? '检查中…' : '检查专线'}</button>${b.authorized ? '' : ` <button class="ac-text-btn" data-ac="agy-bind-edit" data-profile="${esc(id)}">改选专线</button>`}</p></section>`;
+    return `<section class="ac-codex-exit" aria-label="专线与本机专用浏览器"><strong>专线与本机专用浏览器</strong><p>${esc(b.ip + ' · ' + b.name + (b.vpsName ? ' · 所在 VPS：' + b.vpsName : ''))}</p><p>${esc(lock + ' · 本机经 ' + b.proxy.replace('http://', '') + ' 出去')}</p><p>${esc(auth)}</p><p>${check} <button class="ac-text-btn" data-ac="agy-exit-check" data-profile="${esc(id)}" ${data.checking ? 'disabled' : ''}>${data.checking === id ? '检查中…' : '检查专线'}</button>${b.authorized ? '' : ` <button class="ac-text-btn" data-ac="agy-bind-edit" data-profile="${esc(id)}">改选专线</button>`}</p><p class="ac-tool-help">${esc('授权：点「授权」拿链接，在你自己的 Chrome 资料里打开（这个资料先装好本专线扩展，整份资料都走 ' + b.ip + '），再把授权码粘回。')} <button class="ac-text-btn" data-ac="agy-chrome-ext" data-profile="${esc(id)}">生成 Chrome 专线扩展</button> <button class="ac-text-btn" data-ac="agy-dedicated-login" data-profile="${esc(id)}">改用专用浏览器授权</button></p></section>`;
   }
   return `<p class="ac-tool-help">${esc('未走专线：现在经 Hub 全局代理出去，Google 登录在本机浏览器。')}<button class="ac-text-btn" data-ac="agy-bind-edit" data-profile="${esc(id)}">绑定专线</button></p>`;
 }

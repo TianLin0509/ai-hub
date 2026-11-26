@@ -71,7 +71,14 @@ function createAccountProfileUsage(deps) {
         email: row.accountEmail || '', subscriptionUntil: row.subscriptionUntilMs || 0, subscriptionChecked: row.subscriptionCheckedMs || 0,
         ...codexFacts(row.home, row.accountKey, row.planType) }));
     const rank = row => { const at = order.indexOf(row.profileId); return at < 0 ? order.length : at; };
-    return { claude, codex: [currentRow, ...others].sort((a,b) => rank(a)-rank(b)),antigravity:antigravityRows() };
+    const out = { claude, codex: [currentRow, ...others].sort((a,b) => rank(a)-rank(b)),antigravity:antigravityRows() };
+    // 固定序号（core/account-seq.js，2026-11-26）：右侧栏「账号N」按建号时的序号，删号不重排。
+    // 序号库由 main.js 注入（deps.accountSeq），单测不注入就不落盘。
+    if (deps.accountSeq) {
+      try { for (const p of ['claude', 'codex', 'antigravity']) require('../../core/account-seq').stampRows(p, out[p], deps.accountSeq()); }
+      catch (error) { console.warn('[account-seq]', error.message); }
+    }
+    return out;
   }
   async function refreshOnce({ provider, profileId, force = false, reuseAntigravityScope } = {}) {
     if (provider && !['claude', 'codex', 'antigravity'].includes(provider)) throw new Error('不支持的账号类型');

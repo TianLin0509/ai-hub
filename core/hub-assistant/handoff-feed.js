@@ -62,7 +62,7 @@ class HandoffFeed {
       const saved = this.store.load('handoff');
       this.batch = saved.filter(x => x.state === 'batch' && x.sessionId && x.kind && typeof x.text === 'string').map(({ state, ...x }) => x);
       for (const x of saved.filter(x => x.state === 'check' && x.sessionId && typeof x.text === 'string'))
-        this.wait(x.sessionId, { entry: { text: x.text }, title: x.title, attempt: 0 });
+        this.wait(x.sessionId, { entry: { text: x.text, ...(Number(x.at) > 0 ? { at: Number(x.at) } : {}) }, title: x.title, attempt: 0 });
       if (this.batch.length) this.arm(5000);
     }
   }
@@ -70,7 +70,7 @@ class HandoffFeed {
   // 交卷宁可多转告一次、不能丢：重启时还在送的按没送出处理，重新送。
   persist(now = false) {
     if (!this.store) return;
-    const checks = [...this.pending].map(([sessionId, p]) => ({ state: 'check', sessionId, title: p.title, text: String(p.entry?.text || '') }));
+    const checks = [...this.pending].map(([sessionId, p]) => ({ state: 'check', sessionId, title: p.title, text: String(p.entry?.text || ''), ...(Number(p.entry?.at) > 0 ? { at: Number(p.entry.at) } : {}) }));
     const batch = (this.sending || []).filter(i => !this.batch.some(x => x.sessionId === i.sessionId)).concat(this.batch);
     try { this.store.save('handoff', batch.map(x => ({ state: 'batch', ...x })).concat(checks), { now }); } catch (error) { console.warn('[handoff] 落盘失败', error.message); }
   }
@@ -119,6 +119,10 @@ class HandoffFeed {
     if (kind === 'silent') return kind;
     if (kind === 'progress') { this.progress.set(sessionId, { line: conclusion(item.entry.text), at: this.now() }); return kind; }
     this.progress.delete(sessionId);
+    // 交卷记进「完成待阅读」（当前概览第 4 个 Tab）：时刻 + 原文，Hub 重启后还在。
+    // 完成时刻用这条答复本身的时间，不用 5 秒后复核的时刻：否则复核前点开看过的会被当成没看（审查第 4 项）。重启恢复的待复核项也带着原答复。
+    // 升级前落盘的待复核项没有原答复时间：不记（记成「现在完成」会让看过的结果复活，复审 ca01bd6d），交卷直送本身照常。
+    if (kind === 'handoff' && Number(item.entry.at) > 0) this.a.noteHandoff?.(sessionId, { at: Number(item.entry.at), text: item.entry.text, title: item.title });
     const code = this.trackDecision(sessionId, kind, item);
     if (this.cardMode()) { void this.card({ sessionId, kind, title: item.title, text: item.entry.text, code }); return kind; }
     this.batch = this.batch.filter(x => x.sessionId !== sessionId).concat({ sessionId, kind, title: item.title, text: item.entry.text, at: this.now(), ...(code ? { code } : {}) });

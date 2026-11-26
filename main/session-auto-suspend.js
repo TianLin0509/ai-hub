@@ -1,8 +1,11 @@
 'use strict';
 
-const AUTO_SUSPEND_IDLE_MS = 5 * 60 * 60 * 1000;
+const AUTO_SUSPEND_IDLE_MS = 30 * 60 * 1000;
 const AUTO_SUSPEND_CHECK_MS = 5 * 60 * 1000;
 const AUTO_SUSPEND_REASON = 'idle-timeout';
+const AUTO_SUSPEND_MAX_ACTIVE = 15;
+const AUTO_SUSPEND_CAP_MIN_IDLE_MS = 10 * 60 * 1000;
+const AUTO_SUSPEND_CAP_REASON = 'active-cap-lru';
 
 function collectProtectedSessionIds({ agentLeagueBridge, groupChatDispatcher, loopEngine, meetingManager, studyBridge } = {}) {
   const protectedIds = new Set();
@@ -73,6 +76,10 @@ function createSessionAutoSuspendScheduler(options = {}) {
   const logger = options.logger || console;
   const idleMs = Math.max(60 * 1000, Number(options.idleMs) || AUTO_SUSPEND_IDLE_MS);
   const checkIntervalMs = Math.max(10 * 1000, Number(options.checkIntervalMs) || AUTO_SUSPEND_CHECK_MS);
+  const maxActiveSessions = Number.isFinite(Number(options.maxActiveSessions))
+    ? Math.max(0, Math.floor(Number(options.maxActiveSessions)))
+    : AUTO_SUSPEND_MAX_ACTIVE;
+  const capMinIdleMs = Math.max(60 * 1000, Number(options.capMinIdleMs) || AUTO_SUSPEND_CAP_MIN_IDLE_MS);
   const getProtectedSessionIds = typeof options.getProtectedSessionIds === 'function'
     ? options.getProtectedSessionIds
     : () => new Set();
@@ -116,14 +123,48 @@ function createSessionAutoSuspendScheduler(options = {}) {
   }
 
   function sweep() {
+    const baseOpts = sweepOptions();
     const result = sessionManager.suspendIdleSessions({
-      ...sweepOptions(),
+      ...baseOpts,
       reason: AUTO_SUSPEND_REASON,
     });
     if (result && result.count > 0 && logger && typeof logger.log === 'function') {
       logger.log(`[session-auto-suspend] requested ${result.count} session(s) after ${idleMs}ms idle: ${(result.requested || []).map(id => String(id).slice(0, 8)).join(',')}`);
     }
-    return result;
+
+    // 活跃会话数超过软上限时，按最冷优先收起已空闲 >= capMinIdleMs 且通过安全闸门的会话。
+    let capRequested = [];
+    if (
+      maxActiveSessions > 0
+      && typeof sessionManager.previewIdleSuspend === 'function'
+      && typeof sessionManager.suspendSession === 'function'
+    ) {
+      const snap = sessionManager.previewIdleSuspend({ ...baseOpts, idleMs: capMinIdleMs });
+      if (snap && snap.ok && snap.total > maxActiveSessions) {
+        let excess = snap.total - maxActiveSessions;
+        const candidates = (snap.items || [])
+          .filter(item => item && item.eligible)
+          .sort((a, b) => (b.idleMs || 0) - (a.idleMs || 0));
+        for (const item of candidates) {
+          if (excess <= 0) break;
+          const res = sessionManager.suspendSession(item.sessionId, {
+            ...baseOpts,
+            minIdleMs: capMinIdleMs,
+            reason: AUTO_SUSPEND_CAP_REASON,
+          });
+          if (res && res.ok) {
+            capRequested.push(item.sessionId);
+            excess -= 1;
+          }
+        }
+        if (capRequested.length > 0 && logger && typeof logger.log === 'function') {
+          logger.log(`[session-auto-suspend] requested ${capRequested.length} cold session(s) above active cap ${maxActiveSessions}: ${capRequested.map(id => String(id).slice(0, 8)).join(',')}`);
+        }
+      }
+    }
+    return capRequested.length > 0
+      ? { ...result, capRequested, totalRequested: (result?.count || 0) + capRequested.length }
+      : result;
   }
 
   function start() {
@@ -150,6 +191,8 @@ function createSessionAutoSuspendScheduler(options = {}) {
   return {
     idleMs,
     checkIntervalMs,
+    maxActiveSessions,
+    capMinIdleMs,
     start,
     stop,
     sweep,
@@ -159,8 +202,11 @@ function createSessionAutoSuspendScheduler(options = {}) {
 }
 
 module.exports = {
+  AUTO_SUSPEND_CAP_MIN_IDLE_MS,
+  AUTO_SUSPEND_CAP_REASON,
   AUTO_SUSPEND_CHECK_MS,
   AUTO_SUSPEND_IDLE_MS,
+  AUTO_SUSPEND_MAX_ACTIVE,
   AUTO_SUSPEND_REASON,
   collectProtectedSessionIds,
   createSessionAutoSuspendScheduler,

@@ -8,7 +8,7 @@ function sessionRuntimeIssue(session, truth = getSessionRuntimeTruth(session)) {
   if (!session || session.status === 'dormant' || truth.state === 'dormant') return null;
   // 自动续跑巡逻器（P1）：疑似停住，只提醒；在「当前概览 → 续跑」Tab 里一键续跑或忽略。
   // 排在「运行异常」前面：报错后停住正是巡逻的结论，证据里已带报错原文，悬停能看到怎么接上。
-  if (session.patrolStall && !(truth && (truth.state === 'running' || truth.state === 'starting'))) {
+  if (session.patrolStall && !session.patrolStall.acked && !(truth && (truth.state === 'running' || truth.state === 'starting'))) {
     const p = session.patrolStall;
     return { label:'疑似停住', message:`${p.label}：${p.evidence}（已停 ${p.idleText}）。在「当前概览 → 续跑」里续跑或忽略` };
   }

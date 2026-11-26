@@ -97,8 +97,9 @@ function createAccountRiskStore({ dataDir, now = Date.now, logger = console }) {
   function snapshot() {
     const at = now(), result = {};
     for (const [key, row] of Object.entries(read().accounts)) {
-      const active = inForce(row.active, at) ? { ...row.active, status: statusOf(row.active) } : null;
-      const expired = row.active && !active ? { ...row.active, endedAt: row.active.until } : null;
+      const current = inForce(row.active, at) ? row.active : row.shareHold;
+      const active = inForce(current, at) ? { ...current, status: statusOf(current) } : null;
+      const expired = row.active && !inForce(row.active, at) ? { ...row.active, endedAt: row.active.until } : null;
       const last = expired || (row.history || []).at(-1) || null;
       if (active || last) result[key] = { active, last };
     }
@@ -147,7 +148,10 @@ function createAccountRiskStore({ dataDir, now = Date.now, logger = console }) {
     });
   }
   function activeFlag(kind, profileId) {
-    try { const flag = read().accounts[keyOf(kind, profileId)]?.active; return inForce(flag, now()) ? flag : null; }
+    try {
+      const row = read().accounts[keyOf(kind, profileId)], at = now();
+      return inForce(row?.active, at) ? row.active : inForce(row?.shareHold, at) ? row.shareHold : null;
+    }
     catch (error) { logger.warn?.('[account-risk] 账号状态读取失败：' + error.message); return null; }
   }
   // 自动换号的候选过滤：读不出记录时记日志，按没有标记处理，不让换号流程卡死。
@@ -172,12 +176,38 @@ function createAccountRiskStore({ dataDir, now = Date.now, logger = console }) {
     try { accounts = read().accounts; } catch (error) { logger.warn?.('[account-risk] 账号状态读取失败：' + error.message); }
     const at = now(), out = new Map();
     for (const id of ids || []) {
-      const flag = accounts[keyOf(kind, id)]?.active;
+      const row = accounts[keyOf(kind, id)];
+      const flag = inForce(row?.active, at) ? row.active : row?.shareHold;
       if (inForce(flag, at)) out.set(id, reasonText(flag));
     }
     return out;
   }
-  return { file, snapshot, flag, clear, isFlagged, reasonOf, manualBlock, pausesRefresh, reasonMap };
+  // 共用占位独立保存在同一份风控记录里：真实风控到期或手动解除后，自动换号仍须跳过共享中的账号。
+  // 有真实状态时继续优先展示它；最后一台设备取消只结束共用占位，不解除真实状态。
+  function holdShare({ profileId, note }) {
+    validate('claude', profileId);
+    return withWriteLock(() => {
+      const data = read(), key = keyOf('claude', profileId), row = data.accounts[key] || { history: [] };
+      row.shareHold = { flaggedAt: row.shareHold?.flaggedAt || now(), until: null, note: String(note).slice(0, NOTE_MAX), status: 'risk', updatedAt: now() };
+      data.accounts[key] = row; write(data); return snapshot();
+    });
+  }
+  function endShareHold({ profileId }) {
+    validate('claude', profileId);
+    return withWriteLock(() => {
+      const data = read(), row = data.accounts[keyOf('claude', profileId)];
+      if (!row) return snapshot();
+      const legacy = false;
+      if (row.shareHold || legacy) {
+        row.history = [...(row.history || []), { ...(row.shareHold || row.active), endedAt: now() }];
+        delete row.shareHold;
+        if (legacy) row.active = null;
+        write(data);
+      }
+      return snapshot();
+    });
+  }
+  return { file, snapshot, flag, clear, holdShare, endShareHold, isFlagged, reasonOf, manualBlock, pausesRefresh, reasonMap };
 }
 
 module.exports = { BATCH_MAX, DAY_MS, DEFAULT_STATUS, FILE_NAME, STATUSES, blocksManual, createAccountRiskStore, inForce, keyOf, reasonText, statusLabel, statusOf };

@@ -368,8 +368,8 @@ class AssistantService {
   overviewBoard(){
     let tasks=[],teams=[],cards=[],parks={};
     try{tasks=this.frontClient.tasks().tasks||[];}catch(error){console.warn('[assistant] overview tasks',error.message);}
-    const sessions=new Map(),inner=new Set();
-    try{for(const s of this.sessions()){sessions.set(s.id,{open:!!s.isOpen,closedByUser:!s.isOpen&&s.suspendReason==='user-close',title:s.title||s.name||''});if(INNER_PURPOSES.includes(s.purpose))inner.add(s.id);}}catch(error){console.warn('[assistant] overview sessions',error.message);}
+    const sessions=new Map(),inner=new Set();let all=[];
+    try{all=this.sessions();for(const s of all){sessions.set(s.id,{open:!!s.isOpen,closedByUser:!s.isOpen&&s.suspendReason==='user-close',title:s.title||s.name||''});if(INNER_PURPOSES.includes(s.purpose))inner.add(s.id);}}catch(error){console.warn('[assistant] overview sessions',error.message);}
     tasks=tasks.filter(t=>!inner.has(t.id));
     try{teams=this.deps.getTeams?.()||[];}catch(error){console.warn('[assistant] overview teams',error.message);}
     try{cards=this.deps.getProgressCards?.()||[];}catch(error){console.warn('[assistant] overview cards',error.message);}
@@ -385,8 +385,19 @@ class AssistantService {
     // 同一问还在的跳过记录：标成在用（不受 90 天 / 500 条清理），并每月续期一次（复验建议 8）。
     else{store.inUse=new Set(board.decisions.skipKeysInUse||[]);const old=new Set(skips.filter(r=>Date.now()-(r.at||0)>30*86400000).map(r=>r.key)),touch=(board.decisions.skipKeysInUse||[]).filter(k=>old.has(k));
       if(touch.length){try{store.touch(touch);}catch(error){console.warn('[assistant] overview skips touch',error.message);}}}
+    try{const rs=this.overviewReading(),now=Date.now();let entries=[];try{entries=this.ledger.since(now-14*86400000,{maxEntries:1500,maxChars:3000000}).entries||[];}catch{}
+      const skip=new Set([...inner,...[...board.decisions.main,...board.decisions.more].map(x=>x.sessionId)]);
+      const frontLeads=new Set(all.filter(x=>{try{return this.claims?.isFrontLead(x.id);}catch{return false;}}).map(x=>x.id));
+      const remoteOpen=sid=>{try{return Number(this.care?.remoteOpenFor?.(sid))||0;}catch{return 0;}};
+      const r=require('./overview-reading').buildReading({sessions:all,teams,cards,tasks,entries,state:rs.load(),skip,frontLeads,remoteOpen,now});
+      if(r.seen.length)rs.view(r.seen,now);delete r.seen;board.reading=r;
+    }catch(error){console.warn('[assistant] overview reading',error.message);board.reading={rows:[],older:[],badge:0,total:0,error:error.message};}
     return board;
   }
+  overviewReading(){return this._overviewReading||(this._overviewReading=new (require('./overview-reading').ReadingStore)(path.join(this.deps.dataDir,'assistant')));}
+  overviewRead({ids=[]}={}){const list=(Array.isArray(ids)?ids:[ids]).filter(x=>typeof x==='string'&&x).slice(0,500);if(!list.length)return{ok:false,error:'没有要标记的会话'};this.overviewReading().view(list,Date.now());return{ok:true,done:list.length};}
+  noteViewed(ids){try{this.overviewReading().view(ids,Date.now());}catch(error){console.warn('[assistant] overview viewed',error.message);}}
+  noteHandoff(sessionId,info){try{this.overviewReading().handoff(sessionId,info);}catch(error){console.warn('[assistant] overview handoff',error.message);}}
   overviewSkips(){return this._overviewSkips||(this._overviewSkips=new (require('./overview-skips').OverviewSkips)(path.join(this.deps.dataDir,'assistant')));}
   // action：skip（跳过）、undo（撤销跳过）、keep（把自动过期的恢复出来）。服务端按编号现查问题全文，不信任界面传来的文字。
   overviewSkip({items=[],action='skip'}={}){

@@ -10,10 +10,8 @@ function createAssistantPanel({ document, ipcRenderer, getSession, getActiveSess
   const resumeBar = require('./assistant-resume-card').mountResumeBar({ document, ipcRenderer, showMessage,
     openSession: async id => { closeOtherPanels(); await openSession(id); } });
   void resumeBar.load();
-  // 负责人交卷/请拍板的两行简述条（assistant-brief-bar.js）：不经前台复述，点「打开会话」直接跳过去。
-  const briefBar = require('./assistant-brief-bar').mountBriefBar({ document, window, ipcRenderer, showMessage, getActiveSessionId,
-    openSession: async id => { closeOtherPanels(); await openSession(id); } });
-  void briefBar.load();
+  // 背后的通知照旧：交卷与请拍板仍记进前台对话记录、推到手机，请拍板仍计入概览「待你定」红点；只是不再挂顶部浮条。
+  // 模块保留（单测与以后想恢复时用）。
   const setClass = (element, name, value) => { if (element.classList.contains(name) !== value) element.classList.toggle(name, value); };
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const isOpen = () => document.body.classList.contains('assistant-session-active')
@@ -171,7 +169,6 @@ function createAssistantPanel({ document, ipcRenderer, getSession, getActiveSess
     else if (notice?.kind === 'auto-resume') { if (!resumeBar.current()) void resumeBar.load(); }
     // 会话进展：那一行已经在助理对话里，会话答完时 Hub 另有完成通知，这里不再弹提示条。
     else if (notice?.kind === 'session-progress') {}
-    // 负责人简述：顶部简述条已经显示（briefBar 自己收这条通知），不再弹「可在前台查看」。
     else if (notice?.kind === 'lead-handoff' || notice?.kind === 'lead-decide') {}
     else if (notice?.text) showMessage?.(`${notice.title || '关注任务'}有新回复，可在前台查看。`);
     if (isOpen()) void refresh();

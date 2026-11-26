@@ -10,7 +10,7 @@ const BADGE_MS = 60000;
 const taskRowsFor = h => Math.max(4, Math.min(14, Math.floor(((h || 900) - 340) / 50)));
 const ST = { waiting: ['等你', 'warn'], stuck: ['卡住', 'bad'], running: ['进行中', 'acc'], done: ['已完成', 'mute'] };
 const AR_ROWS = 5; // 「续跑」Tab 每页行数
-const AR_ACT = { resumed: ['已续', 'ok'], uncertain: ['需核对', 'warn'], skipped: ['未续', 'mute'], failed: ['未续', 'bad'], retrying: ['重试中', 'warn'] };
+const AR_ACT = { resumed: ['已续', 'ok'], uncertain: ['需核对', 'warn'], skipped: ['未续', 'mute'], failed: ['未续', 'bad'], retrying: ['重试中', 'warn'], interrupted: ['待续', 'bad'] };
 const URG = { blocking: ['已停，在等你', 'bad'], deadline: ['有期限', 'warn'], partial: ['其余部分在推进', 'mute'] };
 const REPLY = { delivered: ['✓ 已送达', 'ok'], read: ['✓ 已读（已开工）', 'ok'], unconfirmed: ['已发出，未确认送达', 'warn'], queued: ['排队中，对方忙完就送', 'warn'] };
 
@@ -25,6 +25,7 @@ function createAssistantOverview({ document, window, ipcRenderer, showMessage = 
   const LEFT_ROWS = 5;
   const keyOf = x => x.id + '#' + (x.ver || '');
   const badges = new Set();
+  const reading = require('./assistant-overview-reading').createReadingTab({ ipcRenderer, window, esc, showMessage, openSession, close: () => close(), refresh: () => refresh() });
 
   async function load() {
     if (loading) return data;
@@ -61,7 +62,7 @@ function createAssistantOverview({ document, window, ipcRenderer, showMessage = 
     root = document.createElement('div'); root.className = 'ov-mask'; root.hidden = true;
     root.innerHTML = `<section class="ov-modal" role="dialog" aria-modal="true" aria-label="当前概览">
       <header class="ov-head"><h2>当前概览</h2>
-        <div class="ov-tabs" role="tablist"><button type="button" role="tab" data-ov-tab="d">待我决策<span class="ov-n" data-n="d"></span></button><button type="button" role="tab" data-ov-tab="p">任务进展<span class="ov-n" data-n="p"></span></button><button type="button" role="tab" data-ov-tab="r">续跑<span class="ov-n" data-n="r"></span></button></div>
+        <div class="ov-tabs" role="tablist"><button type="button" role="tab" data-ov-tab="d">待我决策<span class="ov-n" data-n="d"></span></button><button type="button" role="tab" data-ov-tab="p">任务进展<span class="ov-n" data-n="p"></span></button><button type="button" role="tab" data-ov-tab="n">完成待阅读<span class="ov-n" data-n="n"></span></button><button type="button" role="tab" data-ov-tab="r">续跑<span class="ov-n" data-n="r"></span></button></div>
         <span class="ov-sp"></span><span class="ov-at"></span><button type="button" class="ov-icon" data-ov="refresh" title="刷新">⟳</button><button type="button" class="ov-icon" data-ov="close" title="关闭（Esc）">×</button></header>
       <div class="ov-body"></div>
       <footer class="ov-foot"></footer></section>`;
@@ -74,7 +75,7 @@ function createAssistantOverview({ document, window, ipcRenderer, showMessage = 
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && root && !root.hidden) close(); });
     // 拖动窗口改变高度后重画，每页行数跟着变，不裁掉最后一行（简化复审建议）。
     let resizeTimer = null;
-    window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (root && !root.hidden && tab === 'p') paint(); }, 120); });
+    window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (root && !root.hidden && (tab === 'p' || tab === 'n')) paint(); }, 120); });
     root.addEventListener('mousedown', e => { if (e.target === root) close(); });
   }
 
@@ -92,8 +93,10 @@ function createAssistantOverview({ document, window, ipcRenderer, showMessage = 
     else if (a === 'refresh') void refresh(true);
     else if (a === 'send') void send(b.dataset.ovFor);
     else if (a === 'ar-go') void resumeOne(b.dataset.ovFor, b.dataset.ovSid);
+    else if (a === 'ar-all') void resumeAllRows(b.dataset.ovFor);
     else if (a === 'ar-patrol') void patrolAct('patrol-resume', b.dataset.ovSid);
     else if (a === 'ar-ignore') void patrolAct('patrol-dismiss', b.dataset.ovSid);
+    else if (a === 'ar-ignore-all') void ignoreAllStalls();
     else if (a === 'ar-toggle') void toggleAutoResume();
     else if (a === 'ar-mode') void setPatrolMode(b.dataset.ovPmode);
     else if (a === 'rprev') { rp = Math.max(0, rp - 1); paint(); }
@@ -110,6 +113,7 @@ function createAssistantOverview({ document, window, ipcRenderer, showMessage = 
     else if (a === 'lprev') { lp = Math.max(0, lp - 1); paint(); }
     else if (a === 'lnext') { lp++; paint(); }
     else if (a === 'done') { showDone = !showDone; page = 0; paint(); }
+    else if (a && a.startsWith('rd-')) { if (reading.click(a, b, data) === 'paint') paint(); }
   }
 
   const allDecisions = () => { const d = data?.decisions; if (!d) return []; return [...d.main, ...d.more, ...d.unverified]; };
@@ -243,6 +247,19 @@ function createAssistantOverview({ document, window, ipcRenderer, showMessage = 
     finally { arBusy.delete(k); }
     await refresh();
   }
+  // 重启打断的会话「全部续跑」：主进程只挑「待续」的行，同时最多 2 个在恢复、发续跑语（core/hub-assistant/restart-resume.js resumeRows）。
+  async function resumeAllRows(id) {
+    const k = id + '|*';
+    if (arBusy.has(k)) return;
+    arBusy.add(k); paint();
+    try {
+      const r = await ipcRenderer.invoke('assistant:auto-resume', { id, action: 'resume-all' });
+      const bad = (r?.results || []).filter(x => !x.ok);
+      showMessage(`已给 ${r?.sent || 0} 个会话发了续跑语` + (bad.length ? `；${bad.length} 个没发出去（原因见各行）` : ''));
+    } catch (error) { showMessage('全部续跑没办成：' + error.message); }
+    finally { arBusy.delete(k); }
+    await refresh();
+  }
   // 巡逻提醒的「续跑」「忽略」：主进程处理（续跑走 P0 的按钮路径，同一套认领），结果回来刷新列表。
   async function patrolAct(action, sessionId) {
     const k = 'patrol|' + sessionId;
@@ -254,6 +271,16 @@ function createAssistantOverview({ document, window, ipcRenderer, showMessage = 
       if (r?.ok === false && r.error) showMessage('没续上：' + r.error);
     } catch (error) { showMessage((action === 'patrol-resume' ? '续跑' : '忽略') + '没办成：' + error.message); }
     finally { arBusy.delete(k); }
+    await refresh();
+  }
+  // 一键清除：把「现在停着」里的提醒全部忽略（侧栏 ⚠ 一并撤下）；只忽略这一回合，之后再停住还会重新提醒。
+  async function ignoreAllStalls() {
+    // 记下点击那一刻每条提醒的编号：逐条忽略期间某会话换成了新提醒，后端核对不一致就不动它。
+    const snap = (stalled || []).filter(s => s.sessionId).map(s => ({ sessionId: s.sessionId, reminderId: s.id }));
+    for (const x of snap) {
+      try { const r = await ipcRenderer.invoke('assistant:auto-resume', { action: 'patrol-dismiss', sessionId: x.sessionId, reminderId: x.reminderId }); if (r?.stalled) stalled = r.stalled; }
+      catch (error) { showMessage('忽略没办成：' + error.message); break; }
+    }
     await refresh();
   }
   async function toggleAutoResume() {
@@ -268,21 +295,23 @@ function createAssistantOverview({ document, window, ipcRenderer, showMessage = 
     catch (error) { showMessage('档位没改成：' + error.message); }
     await refresh();
   }
-  const arTrig = (t, long = false) => t === 'hub-restart' ? (long ? 'Hub 重启后自动续跑' : 'Hub 重启') : t === 'patrol' ? (long ? '巡逻提醒后续跑' : '巡逻提醒') : (long ? 'CLI 进程重开后自动续跑' : 'CLI 进程重开');
+  const arTrig = (t, long = false) => t === 'hub-restart-turn' ? (long ? 'Hub 重启打断的会话' : 'Hub 重启打断') : t === 'hub-restart' ? (long ? 'Hub 重启后自动续跑' : 'Hub 重启') : t === 'patrol' ? (long ? '巡逻提醒后续跑' : '巡逻提醒') : (long ? 'CLI 进程重开后自动续跑' : 'CLI 进程重开');
   const arTitle = (c, long = false) => c.trigger === 'patrol' && (c.rows || []).some(r => r.by === 'patrol-auto' || r.by === 'quota-resume') ? (long ? '巡逻自动续' : '自动续') : arTrig(c.trigger, long);
   const arCount = (c, act) => (c.rows || []).filter(r => (act === 'skipped' ? r.action === 'skipped' || r.action === 'failed' : r.action === act)).length;
   const arTime = at => at ? new Date(at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '';
-  const arCan = c => (c.rows || []).filter(r => r.canResume && r.action !== 'resumed').length;
+  // 等你决定续不续的行（角标数）：重启卡上点过「不用了」的不算。
+  const arCan = c => (c.rows || []).filter(r => r.canResume && r.action !== 'resumed' && r.code !== 'dismissed').length;
+  const arTodo = c => (c.rows || []).filter(r => r.action === 'interrupted').length;
   const arOpen = () => (stalled || []).length + (ar || []).reduce((n, c) => n + arCan(c), 0);
   function paintResume() {
     const cards = ar || [], stops = stalled || [];
     // 左栏一个列表、两组：「现在停着」（巡逻提醒，置顶）+「近 3 天记录」（自动续跑 / 按钮续跑的结果）。按屏分页，不出滚动条。
     const items = [...stops.map(s => ({ kind: 'stall', id: s.id, s })), ...cards.map(c => ({ kind: 'card', id: c.id, c }))];
-    if (!items.length) return '<div class="ov-empty big">现在没有停住的会话，近 3 天也没有续跑记录。<br><small>巡逻器每分钟看一遍打开着的会话：报错后停、回复半截、送达没开工、压缩后没接上、等结果没被叫醒，都会出现在这里。</small></div>';
+    if (!items.length) return '<div class="ov-empty big">现在没有停住的会话，近 3 天也没有续跑记录。<br><small>Hub 重启时正在干活的会话、巡逻器每分钟看到的停住会话（报错后停、回复半截、送达没开工、压缩后没接上、等结果没被叫醒），都会出现在这里。</small></div>';
     const pages = Math.max(1, Math.ceil(items.length / LEFT_ROWS)); rp = Math.min(rp, pages - 1);
     const shown = items.slice(rp * LEFT_ROWS, rp * LEFT_ROWS + LEFT_ROWS);
     if (!curR || !items.some(x => x.id === curR)) curR = shown[0]?.id || null;
-    let left = `<div class="ov-left-head"><b>现在停着 ${stops.length}</b><span>近 3 天记录 ${cards.length}</span></div>`
+    let left = `<div class="ov-left-head"><b>现在停着 ${stops.length}</b>${stops.length ? '<button type="button" class="ov-link" data-ov="ar-ignore-all" title="把现在停着的提醒全部忽略，侧栏的 ⚠ 一并撤下；之后再停住还会重新提醒">全部忽略</button>' : ''}<span>近 3 天记录 ${cards.length}</span></div>`
       + (breakers || []).map(b => `<div class="ov-ar-breaker" title="${esc(b.text)}">⚠ ${esc(b.text)}</div>`).join('') + '<div class="ov-list">';
     let lastKind = null;
     for (const x of shown) {
@@ -294,9 +323,9 @@ function createAssistantOverview({ document, window, ipcRenderer, showMessage = 
         continue;
       }
       const c = x.c, can = arCan(c);
-      const tags = [['resumed', 'ok', '已续'], ['uncertain', 'warn', '需核对'], ['skipped', 'mute', '未续']].map(([k, cls, label]) => arCount(c, k) ? `<span class="ov-chip ${cls}">${label} ${arCount(c, k)}</span>` : '').join('');
+      const tags = [['interrupted', 'bad', '待续'], ['resumed', 'ok', '已续'], ['uncertain', 'warn', '需核对'], ['skipped', 'mute', '未续']].map(([k, cls, label]) => arCount(c, k) ? `<span class="ov-chip ${cls}">${label} ${arCount(c, k)}</span>` : '').join('');
       left += `<button type="button" class="ov-li${c.id === curR ? ' on' : ''}" data-ov-r="${esc(c.id)}"><span class="ov-li-top"><b>${arTitle(c)}</b><span class="ov-tags">${tags}</span></span>`
-        + `<span class="ov-li-q">${esc(c.trigger === 'hub-restart' ? `检查了 ${(c.rows || []).length} 个会话` : (c.rows?.[0]?.title || ''))}${can ? ` · ${can} 个等你决定续不续` : ''}</span><span class="ov-li-meta"><span>${esc(arTime(c.startedAt || c.at))}</span>${c.state === 'dismissed' ? '<span>提示条已收起</span>' : ''}</span></button>`;
+        + `<span class="ov-li-q">${esc(c.trigger === 'hub-restart-turn' ? `打断了 ${(c.rows || []).length} 个在干活的会话` : c.trigger === 'hub-restart' ? `检查了 ${(c.rows || []).length} 个会话` : (c.rows?.[0]?.title || ''))}${can ? ` · ${can} 个等你决定续不续` : ''}</span><span class="ov-li-meta"><span>${esc(arTime(c.startedAt || c.at))}</span>${c.state === 'dismissed' ? '<span>提示条已收起</span>' : ''}</span></button>`;
     }
     left += '</div>';
     if (pages > 1) left += `<div class="ov-left-foot"><span class="ov-lp"><button type="button" data-ov="rprev"${rp ? '' : ' disabled'}>‹</button>${rp + 1}/${pages}<button type="button" data-ov="rnext"${rp < pages - 1 ? '' : ' disabled'}>›</button></span></div>`;
@@ -319,11 +348,13 @@ function createAssistantOverview({ document, window, ipcRenderer, showMessage = 
         + '</div>';
     } else if (sel?.kind === 'card') {
       const c = sel.c, rows = c.rows || [], pg = Math.max(1, Math.ceil(rows.length / AR_ROWS)); arPage = Math.min(arPage, pg - 1);
-      right = `<div class="ov-g-head"><h3>${arTitle(c, true)}</h3><span>${esc(arTime(c.startedAt || c.at))} · 已续 ${arCount(c, 'resumed')}、需核对 ${arCount(c, 'uncertain')}、未续 ${arCount(c, 'skipped')}</span></div>`
+      const todo = arTodo(c), allBusy = arBusy.has(c.id + '|*');
+      right = `<div class="ov-g-head"><h3>${arTitle(c, true)}</h3><span>${esc(arTime(c.startedAt || c.at))} · ${todo ? `待续 ${todo}、` : ''}已续 ${arCount(c, 'resumed')}、需核对 ${arCount(c, 'uncertain')}、未续 ${arCount(c, 'skipped')}</span>`
+        + (todo ? `<button type="button" class="ov-go" data-ov="ar-all" data-ov-for="${esc(c.id)}" title="给所有「待续」的会话发续跑语，同时最多 2 个在恢复"${allBusy ? ' disabled' : ''}>${allBusy ? '续跑中…' : `全部续跑（${todo}）`}</button>` : '') + '</div>'
         + rows.slice(arPage * AR_ROWS, arPage * AR_ROWS + AR_ROWS).map(r => {
           const s = AR_ACT[r.action] || [r.action, 'mute'], busy = arBusy.has(c.id + '|' + r.id), can = r.canResume && r.action !== 'resumed';
           return `<div class="ov-row"><div class="ov-row-top"><button type="button" class="ov-link" data-ov-open="${esc(r.id)}" title="打开这个会话">${esc(r.title)} ↗</button><span class="ov-chip ${s[1]}">${s[0]}</span>${can ? `<button type="button" class="ov-go" data-ov="ar-go" data-ov-for="${esc(c.id)}" data-ov-sid="${esc(r.id)}" title="给这个会话发一次续跑语"${busy ? ' disabled' : ''}>${busy ? '发送中…' : '续跑'}</button>` : ''}</div>`
-            + `<div class="ov-row-line">${esc(r.reason || '')}</div><div class="ov-row-meta">${esc(arTime(r.at))}${r.by === 'user-button' ? ' · 你点的续跑' : ''}</div></div>`;
+            + `<div class="ov-row-line">${esc(r.reason || '')}</div>${r.progress ? `<div class="ov-row-line ov-row-prog">上次做到：${esc(r.progress)}</div>` : ''}<div class="ov-row-meta">${r.trigger === 'hub-restart-turn' ? '打断于 ' : ''}${esc(arTime(r.at))}${r.by === 'user-button' ? ' · 你点的续跑' : ''}</div></div>`;
         }).join('') + (pg > 1 ? `<div class="ov-pager"><button type="button" data-ov="arprev"${arPage ? '' : ' disabled'}>上一页</button><span>${arPage + 1} / ${pg}</span><button type="button" data-ov="arnext"${arPage < pg - 1 ? '' : ' disabled'}>下一页</button></div>` : '');
     }
     return `<div class="ov-cols"><div class="ov-left">${left}</div><div class="ov-right">${right}</div></div>`;
@@ -348,12 +379,14 @@ function createAssistantOverview({ document, window, ipcRenderer, showMessage = 
     root.querySelectorAll('[data-ov-tab]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.ovTab === tab)));
     root.querySelector('[data-n="d"]').textContent = d.badge || '';
     root.querySelector('[data-n="p"]').textContent = p.total || '';
+    root.querySelector('[data-n="n"]').textContent = data.reading?.badge ? (data.reading.badge > 9 ? '9+' : String(data.reading.badge)) : '';
     root.querySelector('[data-n="r"]').textContent = arOpen() || '';
     root.querySelector('.ov-at').textContent = '前台 ' + new Date(data.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) + ' 汇总';
-    root.querySelector('.ov-body').innerHTML = tab === 'd' ? paintDecisions() : tab === 'r' ? paintResume() : paintProgress();
+    root.querySelector('.ov-body').innerHTML = tab === 'd' ? paintDecisions() : tab === 'r' ? paintResume() : tab === 'n' ? reading.paint(data) : paintProgress();
     const f = d.filtered;
     root.querySelector('.ov-foot').innerHTML = tab === 'd'
       ? `<span>只列负责人一级要你定的事，成员的问题由负责人汇总后再报。${f.skipsIssue ? `<b class="ov-warn-inline">${esc(f.skipsIssue)}</b>` : ''}</span><span>回复以「用户」身份发到对应会话</span>`
+      : tab === 'n' ? reading.foot
       : tab === 'r' ? `<span>${arMode === 'auto' ? '报错、回复半截、送达没开工、压缩后没接上、重启 / 重开这几类，你没在看的会话自动续（最多 3 次，越往后隔得越久）；其余只提醒。' : arMode === 'off' ? '自动续跑已关：不巡逻、不自动续。' : '巡逻只提醒、不自动发；点「续跑」由你决定。'}</span><span class="ov-ar-switch">巡逻：${[['off', '关'], ['remind', '只提醒'], ['auto', '自动续故障类']].map(([m, t]) => `<button type="button" class="ov-mode${arMode === m ? ' on' : ''}" data-ov="ar-mode" data-ov-pmode="${m}" aria-pressed="${arMode === m}">${t}</button>`).join('')}</span>`
       : '<span>每个任务一行：项目只显示负责人，成员不单列；一句话进展取负责人进展卡，没写卡的取最近答复。</span><span>点会话名可直接打开</span>';
     if (fid) { const el = root.querySelector(`[data-ov-draft="${CSS.escape(fid)}"]`); if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch {} } }

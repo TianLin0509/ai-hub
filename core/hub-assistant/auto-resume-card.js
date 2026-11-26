@@ -70,11 +70,23 @@ class AutoResumeCards {
     return this.all().filter(c => (c.updatedAt || c.at || 0) >= since).sort((a, b) => (b.updatedAt || b.at || 0) - (a.updatedAt || a.at || 0));
   }
 
-  async act({ id, action, sessionId, enabled, mode } = {}) {
+  async act({ id, action, sessionId, reminderId, enabled, mode } = {}) {
     const p = this.patrol;
     // mode：'off' 关 / 'remind' 只提醒 / 'auto' 自动续故障类（三档开关）。
     const state = () => ({ enabled: p ? !!p.enabled() : true, mode: p ? (p.enabled() ? (p.mode?.() === 'auto' ? 'auto' : 'remind') : 'off') : 'remind', breakers: p?.breakers ? p.breakers() : [] });
-    if (action === 'list') return { ok: true, cards: this.list(), stalled: p ? p.list() : [], ...state() };
+    // 重启卡（restart-resume.js：Hub 重启时回合还在进行的会话）也进「续跑」Tab，与自动续跑记录按时间排在一起（2026-11-26）。
+    const restart = this.a.restartResume;
+    if (action === 'list') {
+      let turns = []; try { turns = restart ? restart.list() : []; } catch (error) { console.warn('[assistant] restart-resume list', error.message); }
+      const cards = [...turns, ...this.list()].sort((a, b) => (b.startedAt || b.updatedAt || b.at || 0) - (a.startedAt || a.updatedAt || a.at || 0));
+      return { ok: true, cards, stalled: p ? p.list() : [], ...state() };
+    }
+    if (String(id || '').startsWith('restart-resume:') && (action === 'resume' || action === 'resume-all')) {
+      if (!restart) throw new Error('重启续跑尚未就绪');
+      const r = await restart.resumeRows({ id, sessionId: action === 'resume' ? sessionId : null });
+      const failed = r.results.find(x => !x.ok);
+      return { ok: r.ok, sent: r.sent, results: r.results, row: failed ? { reason: failed.message } : null };
+    }
     if (action === 'set-mode') {
       if (!p) throw new Error('巡逻器尚未就绪');
       if (!['off', 'remind', 'auto'].includes(mode)) throw new Error('未知档位');
@@ -82,7 +94,7 @@ class AutoResumeCards {
       return { ok: true, ...state() };
     }
     // 巡逻提醒：忽略（这一回合不再提醒）/ 续跑（走按钮路径）/ 总开关。
-    if (action === 'patrol-dismiss') { if (!p) throw new Error('巡逻器尚未就绪'); return { ok: !!p.dismiss(sessionId), stalled: p.list() }; }
+    if (action === 'patrol-dismiss') { if (!p) throw new Error('巡逻器尚未就绪'); return { ok: !!p.dismiss(sessionId, reminderId || null), stalled: p.list() }; }
     if (action === 'patrol-resume') {
       if (!p) throw new Error('巡逻器尚未就绪');
       const key = `patrol|${sessionId}`;

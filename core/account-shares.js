@@ -34,7 +34,7 @@ function readAccountShares({ dir = keeperDir(), logger = console } = {}) {
       const id = accountKey(row.account);
       if (!id) continue;
       (result[id] ||= []).push({
-        device: String(row.device || '其他设备').slice(0, 40),
+        device: String(row.device || (row.id ? (row.os === 'mac' ? 'Mac' : 'Windows') + ' · ' + row.id : '其他设备')).slice(0, 40),
         label: String(row.label || '').slice(0, 40),
         since: String(row.createdAt || '').slice(0, 25),
       });
